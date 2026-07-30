@@ -149,12 +149,26 @@ class AdbClient:
         self._device: Any = None
 
     def __enter__(self) -> AdbClient:
+        """Connect to the device.
+
+        RAISES:
+            AdbCommandError: If the connection or auth handshake fails —
+                e.g. the host isn't listening on the ADB port (very common
+                mid-scan, when most probed IPs won't be Fire TV devices at
+                all). Previously this let adb_shell's/socket's raw exception
+                escape uncaught, which crashed `Scanner.scan()`'s whole
+                thread pool on the first non-responsive host instead of
+                just skipping it.
+        """
         from adb_shell.adb_device import AdbDeviceTcp
 
-        self._device = AdbDeviceTcp(
-            self._ip, self._port, default_transport_timeout_s=self._transport_timeout_s
-        )
-        self._device.connect(rsa_keys=[self._key_store.signer()], auth_timeout_s=self._auth_timeout_s)
+        try:
+            self._device = AdbDeviceTcp(
+                self._ip, self._port, default_transport_timeout_s=self._transport_timeout_s
+            )
+            self._device.connect(rsa_keys=[self._key_store.signer()], auth_timeout_s=self._auth_timeout_s)
+        except Exception as exc:
+            raise AdbCommandError(f"ADB connect failed for {self._ip}: {exc}") from exc
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
