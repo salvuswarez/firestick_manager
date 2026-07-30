@@ -41,8 +41,16 @@ class SmbClient:
         smbclient.reset_connection_cache()
 
     def path(self, remote: str) -> str:
-        """RETURNS: str: Full UNC path for `remote` under the configured share."""
-        return f"\\\\{self._config.smb_host}\\{self._config.smb_share}\\{remote}"
+        """RETURNS: str: Full UNC path for `remote` under the configured share.
+
+        `remote` is normalized to backslashes first — callers build it with
+        forward slashes (e.g. `f"{backup_dir}/{device_dir}"`), and mixing
+        that with the UNC prefix's backslashes produced paths `smbclient`
+        could not resolve past the first directory level
+        (STATUS_OBJECT_PATH_NOT_FOUND on a directory that genuinely exists).
+        """
+        normalized = remote.replace("/", "\\")
+        return f"\\\\{self._config.smb_host}\\{self._config.smb_share}\\{normalized}"
 
     def makedirs(self, remote: str) -> None:
         """Create `remote` (and parents) on the share if it does not exist."""
