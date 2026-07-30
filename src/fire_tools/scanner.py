@@ -5,6 +5,7 @@ import logging
 import platform
 import re
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
@@ -13,6 +14,9 @@ LOGGER = logging.getLogger(__name__)
 _PING_WORKERS = 50
 _ADB_WORKERS = 20
 _PING_TIMEOUT = 1
+_PING_COUNT = 2
+_ADB_PROBE_ATTEMPTS = 2
+_ADB_RETRY_BACKOFF_S = 1.5
 
 
 class Scanner:
@@ -60,25 +64,31 @@ class Scanner:
         return self.adb_runner(ip, cmd)
 
     def _ping(self, ip: str) -> str | None:
-        """Ping a single host and return the IP if it responds.
+        """Ping a single host and return the IP if any reply is received.
+
+        Sends `_PING_COUNT` packets rather than one — a single dropped ICMP
+        packet (common on weaker/older WiFi radios, e.g. older Fire TV Stick
+        hardware) would otherwise silently drop a live, reachable host from
+        the scan before it ever reaches the ADB probe stage.
 
         **PARAMETERS:**
         - ip: IPv4 address to ping.
 
         **RETURNS:**
-        The IP string if the host responds, otherwise None.
+        The IP string if the host replies to at least one packet, otherwise None.
         """
         system = platform.system()
+        count = str(_PING_COUNT)
         if system == "Windows":
-            cmd = ["ping", "-n", "1", "-w", "1000", ip]
+            cmd = ["ping", "-n", count, "-w", "1000", ip]
         else:
-            cmd = ["ping", "-c", "1", "-W", "1", ip]
+            cmd = ["ping", "-c", count, "-W", "1", ip]
         try:
             proc = subprocess.run(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=_PING_TIMEOUT + 1,
+                timeout=_PING_TIMEOUT * _PING_COUNT + 1,
             )
             if proc.returncode == 0:
                 return ip
@@ -134,6 +144,31 @@ class Scanner:
             table[ip] = mac
         return table
 
+    def _run_adb_retry(self, ip: str, cmd: str) -> str:
+        """Run an ADB command with a short-backoff retry.
+
+        A single ADB connection attempt over a flaky WiFi link (older Fire TV
+        Stick hardware in particular) can reset or time out even against a
+        genuinely reachable, correctly-paired device. One retry after a brief
+        pause turns that transient failure into a successful probe instead of
+        dropping the host from the scan results entirely.
+
+        **PARAMETERS:**
+        - ip: IPv4 address of the target device.
+        - cmd: ADB shell command to execute.
+
+        **RETURNS:**
+        The command output as a string, or an empty string if every attempt failed.
+        """
+        result = ""
+        for attempt in range(_ADB_PROBE_ATTEMPTS):
+            result = self._run_adb(ip, cmd).strip()
+            if result:
+                return result
+            if attempt < _ADB_PROBE_ATTEMPTS - 1:
+                time.sleep(_ADB_RETRY_BACKOFF_S)
+        return result
+
     def _probe_adb(self, ip: str, mac: str) -> dict[str, Any] | None:
         """Collect device metadata via ADB.
 
@@ -145,14 +180,14 @@ class Scanner:
         A device dict with ip, mac, name, model, serial, and android_version,
         or None if the device does not expose a product model.
         """
-        device_name = self._run_adb(ip, "settings get global device_name").strip()
-        if not device_name or device_name.lower() == "null":
-            device_name = self._run_adb(ip, "getprop ro.product.model").strip()
-        model = self._run_adb(ip, "getprop ro.product.model").strip()
+        model = self._run_adb_retry(ip, "getprop ro.product.model")
         if not model:
             return None
-        serial = self._run_adb(ip, "getprop ro.serialno").strip()
-        android_version = self._run_adb(ip, "getprop ro.build.version.release").strip()
+        device_name = self._run_adb_retry(ip, "settings get global device_name")
+        if not device_name or device_name.lower() == "null":
+            device_name = model
+        serial = self._run_adb_retry(ip, "getprop ro.serialno")
+        android_version = self._run_adb_retry(ip, "getprop ro.build.version.release")
         return {
             "ip": ip,
             "mac": mac,
