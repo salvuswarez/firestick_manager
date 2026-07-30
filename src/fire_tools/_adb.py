@@ -19,6 +19,16 @@ from .const import ADB_PORT
 
 LOGGER = logging.getLogger(__name__)
 
+# adb_shell's AdbDeviceTcp.shell()/pull()/push() each take their own
+# transport_timeout_s/read_timeout_s per call — they do NOT inherit the
+# connection-level default_transport_timeout_s set at construction, and
+# fall back to the library's own 10s default if not passed explicitly.
+# 10s is fine for most shell commands but not guaranteed for a slower one
+# (e.g. `tar czf` over a large userdata dir), and is far too short for a
+# multi-hundred-MB backup transfer — which is exactly what timed out mid-pull.
+_SHELL_TIMEOUT_S = 60.0
+_TRANSFER_TIMEOUT_S = 180.0
+
 
 class AdbError(Exception):
     """Base error for ADB communication failures."""
@@ -148,7 +158,7 @@ class AdbClient:
                 empty string, so callers cannot mistake failure for success.
         """
         try:
-            output = self._device.shell(cmd)
+            output = self._device.shell(cmd, transport_timeout_s=_SHELL_TIMEOUT_S, read_timeout_s=_SHELL_TIMEOUT_S)
         except Exception as exc:
             raise AdbCommandError(f"ADB command failed for {self._ip} ({cmd}): {exc}") from exc
         LOGGER.debug("ADB ok %s (%s): %s", self._ip, cmd, (output or "").strip()[:200])
@@ -180,7 +190,7 @@ class AdbClient:
         """
         try:
             buf = io.BytesIO()
-            self._device.pull(remote_path, buf)
+            self._device.pull(remote_path, buf, transport_timeout_s=_TRANSFER_TIMEOUT_S, read_timeout_s=_TRANSFER_TIMEOUT_S)
             with open(local_path, "wb") as f:
                 f.write(buf.getvalue())
         except Exception as exc:
@@ -195,7 +205,7 @@ class AdbClient:
         try:
             with open(local_path, "rb") as f:
                 buf = io.BytesIO(f.read())
-            self._device.push(buf, remote_path)
+            self._device.push(buf, remote_path, transport_timeout_s=_TRANSFER_TIMEOUT_S, read_timeout_s=_TRANSFER_TIMEOUT_S)
         except Exception as exc:
             raise AdbCommandError(f"ADB push failed for {self._ip} ({remote_path}): {exc}") from exc
 
