@@ -4,6 +4,16 @@ CLI tool for managing a small fleet of Amazon Fire TV Stick devices: debloating,
 
 See `.claude/` for the deep reference: agents (`fleet-device-specialist`, `kodi-deploy-specialist`), skills (CLI reference, gold-config workflow, ADB ops, devices.yml schema), commands (`/fire-scan`, `/fire-capture`, `/fire-deploy`, `/fire-maintain`, `/fire-builds`), and project memory (architecture decisions, gotchas, cross-repo references).
 
+## Setup
+
+```bash
+cp .env.example .env                              # fill in real SMB host/user/pass
+cp resources/devices.yml.example resources/devices.yml   # or just run `uv run fire-tools scan`
+uv sync
+```
+
+Both `.env` and `resources/devices.yml` are gitignored — real credentials and real device MAC/IP data never get committed. The `.example` files are the tracked reference for the expected shape; keep them in sync with `SmbConfig`/`Device` if those fields change.
+
 ## Quick facts
 
 - Package manager: **uv** (migrated from Poetry — see `.claude/memory/architecture_uv_migration.md`)

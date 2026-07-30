@@ -1,0 +1,15 @@
+# Copy this file to devices.yml and fill in real devices, or run
+# `uv run fire-tools scan` to auto-populate it. devices.yml is gitignored —
+# it accumulates real MAC addresses/IPs from your network, never commit it.
+#
+# `ip`/`mac`/`name` are written by `scan`. `resolution` is never written by
+# scan — hand-add it only if a device needs a non-default Kodi resolution.
+
+devices:
+  - ip: 192.168.1.50
+    mac: aa:bb:cc:dd:ee:ff
+    name: Example Fire TV
+  - ip: 192.168.1.51
+    mac: aa:bb:cc:dd:ee:00
+    name: Another Example Fire TV
+    resolution: "1920x1080"
