@@ -1,0 +1,27 @@
+[project]
+name = "firestick-manager"
+version = "0.1.0"
+description = "manages kodi and other apps for firestick devices"
+authors = [
+    {name = "salvuswarez",email = "60023924+salvuswarez@users.noreply.github.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "click>=8.1.0",
+    "pyyaml",
+    "smbprotocol>=1.10.1,<2",
+    "adb-shell[async]>=0.4.4,<0.5",
+    "pydantic>=2.0,<3",
+]
+
+[project.scripts]
+fire-tools = "fire_tools.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fire_tools"]

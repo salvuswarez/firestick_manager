@@ -1,0 +1,41 @@
+# Secrets — never commit
+.env
+*.secret
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Backup files from tooling migrations
+*.bak
+
+# Captured Kodi configs / downloaded APKs / staged transfers (large, personal)
+assets/
+archive/
+staging/
+
+# Device inventory — contains real MAC addresses/IPs of home devices
+resources/devices.yml
+
+# Kodi advancedsettings.xml template — contains real MySQL/SMB credentials
+resources/advancedsettings.xml
+
+# ADB key material, if ever generated under the repo instead of ~/.fire_tools
+.adb_keys/
+*adbkey*
+
+# opencode scratch (real backup tarballs, crash logs, handoff notes)
+.opencode/temp/
+
+# Claude Code local-only settings
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
