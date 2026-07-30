@@ -289,5 +289,13 @@ class AdbShellRunner:
         try:
             with AdbClient(ip, self.key_store, transport_timeout_s=10.0) as client:
                 return client.shell_ok(cmd)
-        except AdbError:
+        except AdbError as exc:
+            # Debug, not warning: during a subnet scan the overwhelming
+            # majority of probed IPs simply aren't listening on 5555 at all,
+            # so this fires constantly by design. But when a *known* Fire TV
+            # doesn't show up in scan results, this is the only trace of why —
+            # previously this was fully silent, indistinguishable from "not
+            # a device" and "device errored," making that exact case
+            # undiagnosable without guessing.
+            LOGGER.debug("Scan probe failed for %s (%s): %s", ip, cmd, exc)
             return ""
