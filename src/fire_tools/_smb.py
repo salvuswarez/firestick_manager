@@ -7,15 +7,18 @@ hand-built `\\\\host\\share\\...` strings scattered across the codebase.
 from __future__ import annotations
 
 import logging
-from typing import Iterator
+from typing import Callable, Iterator, TypeVar
 
 import smbclient
+from smbprotocol.exceptions import SMBConnectionClosed
 
 from .models import SmbConfig
 
 LOGGER = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 65536
+_T = TypeVar("_T")
+_RETRYABLE = (SMBConnectionClosed, ConnectionError, BrokenPipeError)
 
 
 class SmbClient:
@@ -40,6 +43,29 @@ class SmbClient:
         """Tear down the shared connection cache (called on integration unload)."""
         smbclient.reset_connection_cache()
 
+    def _call_with_retry(self, fn: Callable[[], _T]) -> _T:
+        """Run `fn`, retrying once against a fresh connection on a stale-socket error.
+
+        `smbclient` caches connections internally and opens them lazily on
+        first use. A connection left idle long enough for the server to
+        close it (e.g. while a slow non-SMB step like an HTTP download runs
+        with no SMB traffic) fails with `SMBConnectionClosed` on the next
+        call, even though nothing about this specific operation is wrong.
+        One retry after resetting the cache is enough to recover.
+
+        **PARAMETERS:**
+        - fn: Zero-argument callable performing the SMB operation.
+
+        **RETURNS:**
+        Whatever `fn` returns.
+        """
+        try:
+            return fn()
+        except _RETRYABLE as exc:
+            LOGGER.warning("SMB connection stale, reconnecting and retrying: %s", exc)
+            self.configure()
+            return fn()
+
     def path(self, remote: str) -> str:
         """RETURNS: str: Full UNC path for `remote` under the configured share.
 
@@ -54,12 +80,16 @@ class SmbClient:
 
     def makedirs(self, remote: str) -> None:
         """Create `remote` (and parents) on the share if it does not exist."""
-        smbclient.makedirs(self.path(remote), exist_ok=True)
+        self._call_with_retry(lambda: smbclient.makedirs(self.path(remote), exist_ok=True))
 
     def write_text(self, remote: str, text: str) -> None:
         """Write `text` to `remote`, creating parent directories as needed."""
-        with smbclient.open_file(self.path(remote), mode="w") as f:
-            f.write(text)
+
+        def _write() -> None:
+            with smbclient.open_file(self.path(remote), mode="w") as f:
+                f.write(text)
+
+        self._call_with_retry(_write)
 
     def read_text(self, remote: str) -> str:
         """RETURNS: str: Contents of `remote`.
@@ -67,9 +97,13 @@ class SmbClient:
         RAISES:
             OSError: If `remote` does not exist or cannot be read.
         """
-        with smbclient.open_file(self.path(remote), mode="r") as f:
-            content = f.read()
-        return content.decode("utf-8") if isinstance(content, bytes) else content
+
+        def _read() -> str:
+            with smbclient.open_file(self.path(remote), mode="r") as f:
+                content = f.read()
+            return content.decode("utf-8") if isinstance(content, bytes) else content
+
+        return self._call_with_retry(_read)
 
     def upload_file(self, local_path: str, remote: str) -> int:
         """Upload a local file to `remote`, chunked.
@@ -77,15 +111,19 @@ class SmbClient:
         RETURNS:
             int: Number of bytes uploaded.
         """
-        size = 0
-        with open(local_path, "rb") as src, smbclient.open_file(self.path(remote), mode="wb") as dst:
-            while True:
-                chunk = src.read(_CHUNK_SIZE)
-                if not chunk:
-                    break
-                dst.write(chunk)
-                size += len(chunk)
-        return size
+
+        def _upload() -> int:
+            size = 0
+            with open(local_path, "rb") as src, smbclient.open_file(self.path(remote), mode="wb") as dst:
+                while True:
+                    chunk = src.read(_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+                    size += len(chunk)
+            return size
+
+        return self._call_with_retry(_upload)
 
     def download_file(self, remote: str, local_path: str) -> None:
         """Download `remote` to `local_path`, chunked.
@@ -93,13 +131,17 @@ class SmbClient:
         RAISES:
             OSError: If `remote` does not exist or cannot be read.
         """
-        with smbclient.open_file(self.path(remote), mode="rb") as src, open(local_path, "wb") as dst:
-            while True:
-                chunk = src.read(_CHUNK_SIZE)
-                if not chunk:
-                    break
-                dst.write(chunk)
+
+        def _download() -> None:
+            with smbclient.open_file(self.path(remote), mode="rb") as src, open(local_path, "wb") as dst:
+                while True:
+                    chunk = src.read(_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+
+        self._call_with_retry(_download)
 
     def scandir(self, remote: str) -> Iterator:
         """RETURNS: Iterator: `smbclient.scandir` entries under `remote`."""
-        return smbclient.scandir(self.path(remote))
+        return self._call_with_retry(lambda: smbclient.scandir(self.path(remote)))
