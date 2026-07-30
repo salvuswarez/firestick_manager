@@ -50,18 +50,39 @@ class AdbRunner(Protocol):
 
 
 class AdbKeyStore:
-    """Loads or generates the ADB RSA key pair once and caches the signer.
+    """Shared ADB session config: the cached RSA signer plus connection timeouts.
+
+    The signer and the timeouts are bundled here rather than threaded as
+    separate parameters through every `AdbClient(...)` call site (jobs/*.py,
+    service.py, `AdbShellRunner`) — this object is already constructed once,
+    in the one place each consumer (CLI, HA integration) resolves its own
+    config (`.env`, or `entry.data`/`entry.options`), and passed everywhere
+    ADB is used.
 
     PARAMETERS:
         key_dir (Path): Directory holding `adbkey` / `adbkey.pub`. Should live
             outside the git-tracked integration directory (e.g. under
             `hass.config.path(".firetools")`), since the private key is a
             standing authorization token for every paired device.
+        shell_timeout_s (float): Default transport/read timeout for
+            `AdbClient.shell()` calls. adb_shell's own default (10s) can be
+            too short for a slower command (e.g. `tar czf` over a large
+            userdata dir).
+        transfer_timeout_s (float): Default transport/read timeout for
+            `AdbClient.pull()`/`push_file()` — needs to cover an entire
+            backup archive transfer, not just a single protocol round-trip.
     """
 
-    def __init__(self, key_dir: Path) -> None:
+    def __init__(
+        self,
+        key_dir: Path,
+        shell_timeout_s: float = _SHELL_TIMEOUT_S,
+        transfer_timeout_s: float = _TRANSFER_TIMEOUT_S,
+    ) -> None:
         self._key_dir = key_dir
         self._signer: Any = None
+        self.shell_timeout_s = shell_timeout_s
+        self.transfer_timeout_s = transfer_timeout_s
 
     def signer(self) -> Any:
         """Return the cached `PythonRSASigner`, generating a key pair if needed.
@@ -158,7 +179,8 @@ class AdbClient:
                 empty string, so callers cannot mistake failure for success.
         """
         try:
-            output = self._device.shell(cmd, transport_timeout_s=_SHELL_TIMEOUT_S, read_timeout_s=_SHELL_TIMEOUT_S)
+            timeout = self._key_store.shell_timeout_s
+            output = self._device.shell(cmd, transport_timeout_s=timeout, read_timeout_s=timeout)
         except Exception as exc:
             raise AdbCommandError(f"ADB command failed for {self._ip} ({cmd}): {exc}") from exc
         LOGGER.debug("ADB ok %s (%s): %s", self._ip, cmd, (output or "").strip()[:200])
@@ -189,8 +211,9 @@ class AdbClient:
             AdbCommandError: If the pull fails.
         """
         try:
+            timeout = self._key_store.transfer_timeout_s
             buf = io.BytesIO()
-            self._device.pull(remote_path, buf, transport_timeout_s=_TRANSFER_TIMEOUT_S, read_timeout_s=_TRANSFER_TIMEOUT_S)
+            self._device.pull(remote_path, buf, transport_timeout_s=timeout, read_timeout_s=timeout)
             with open(local_path, "wb") as f:
                 f.write(buf.getvalue())
         except Exception as exc:
@@ -203,9 +226,10 @@ class AdbClient:
             AdbCommandError: If the push fails.
         """
         try:
+            timeout = self._key_store.transfer_timeout_s
             with open(local_path, "rb") as f:
                 buf = io.BytesIO(f.read())
-            self._device.push(buf, remote_path, transport_timeout_s=_TRANSFER_TIMEOUT_S, read_timeout_s=_TRANSFER_TIMEOUT_S)
+            self._device.push(buf, remote_path, transport_timeout_s=timeout, read_timeout_s=timeout)
         except Exception as exc:
             raise AdbCommandError(f"ADB push failed for {self._ip} ({remote_path}): {exc}") from exc
 

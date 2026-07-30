@@ -13,7 +13,7 @@ from typing import Any
 
 import click
 
-from ._adb import AdbKeyStore, AdbShellRunner
+from ._adb import _SHELL_TIMEOUT_S, _TRANSFER_TIMEOUT_S, AdbKeyStore, AdbShellRunner
 from ._smb import SmbClient
 from .const import DEFAULT_SMB_BACKUP_DIR, DEFAULT_SMB_HOST, DEFAULT_SMB_SHARE
 from .device_store import DeviceStore
@@ -59,7 +59,12 @@ def _build_config() -> SmbConfig:
 
 
 def _adb_keys() -> AdbKeyStore:
-    return AdbKeyStore(_ADB_KEY_DIR)
+    env = _load_env()
+    return AdbKeyStore(
+        _ADB_KEY_DIR,
+        shell_timeout_s=float(env.get("ADB_SHELL_TIMEOUT_S", _SHELL_TIMEOUT_S)),
+        transfer_timeout_s=float(env.get("ADB_TRANSFER_TIMEOUT_S", _TRANSFER_TIMEOUT_S)),
+    )
 
 
 def _smb(config: SmbConfig) -> SmbClient:
