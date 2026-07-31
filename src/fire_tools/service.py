@@ -269,6 +269,7 @@ class FleetService:
             OperationType.CAPTURE_GOLD: lambda: self.start_capture(op.device_ip, None),
             OperationType.DEPLOY: lambda: self.start_deploy(op.device_ip, None),
             OperationType.MAINTAIN: lambda: self.start_maintain(op.device_ip),
+            OperationType.SCAN: lambda: self.start_scan(op.device_ip),
         }.get(op.type)
         return dispatch() if dispatch else None
 
