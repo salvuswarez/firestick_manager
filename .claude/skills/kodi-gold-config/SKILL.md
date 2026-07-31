@@ -10,10 +10,11 @@ description: The Kodi "gold config" capture → SMB → deploy workflow, plus th
 ## Lifecycle
 
 ```
-capture <ip>  ─→  tar czf on-device  ─→  adb pull to staging  ─→  upload to SMB
+capture <ip>  ─→  tar cf + gzip on-device  ─→  verify gzip  ─→  adb pull to staging  ─→  upload to SMB
                                                                         │
 deploy <ip> [--backup dev/file.tar.gz]  ─→  download from SMB  ─→  extract
-    ─→  prune addons to whitelist  ─→  sync addons/userdata/media (hash-diff, not full wipe)
+    ─→  prune addons to whitelist  ─→  apply settings overrides
+    ─→  sync addons/userdata/media (hash-diff, not full wipe)
 ```
 
 - **No local `assets/`/`archive/` anymore.** Both jobs use a per-operation staging dir (`ws: Path`, under `~/.fire_tools/staging/`) that's cleaned up after the job — nothing is retained locally. The archive lives only on the SMB share (`SmbConfig.smb_backup_dir`, default `"backups"`; the HA integration's default is `"kodi-wan/ha_storage/backups"` — check which one your `.env`/config entry actually points at, see `const.py`'s note on this).
@@ -21,6 +22,8 @@ deploy <ip> [--backup dev/file.tar.gz]  ─→  download from SMB  ─→  extra
 - **Deploy no longer wipes and re-pushes everything.** `AdbClient.sync_tree()` (`_adb.py`, replacing the old `push_tree`) hashes both sides (`find ... -exec md5sum {} +` on-device, `hashlib.md5` locally) and only pushes new/changed files, removing remote files with no local counterpart — same end state as the old full wipe, without re-transferring unchanged files over ADB on every run.
 - **Base Kodi APK install is automatic**, not flag-gated, and reused across a `--batch` run: `deploy.py`'s `resolve_base_apk()` downloads `gold/kodi-latest.apk` from SMB once; `cli.py`'s `deploy` command resolves it a single time and passes the same local file into every device's `run_deploy` call (`base_apk_local=`) instead of re-downloading per device. `service.py`'s `deploy_all()` (used by the HA integration) does not yet share this optimization — each concurrently-dispatched job still resolves its own copy; left as a known scope gap since coordinating a shared file's lifetime across concurrent background threads is a materially different problem than the CLI's sequential loop.
 - **`BackupRef` (`_artifacts.py`) owns naming** — `device_dir/filename.tar.gz`, where `device_dir` is `sanitize_device_name(device.name)` (or `"gold"` for the shared base image). Latest-backup resolution sorts `.tar.gz` filenames lexically among SMB `scandir` results, which works because names are `.kodi_YYYYMMDD_HHMMSS.tar.gz`.
+- **Capture uses `tar cf` + a separate `gzip` pass, not `tar czf`.** Toybox's `tar -z` integration silently produced a truncated gzip stream on a real device (`tar` itself reported success) — split into two steps after verifying `tar cf` alone was clean. `capture.py` also runs `_verify_gzip()` on the pulled archive before uploading, so a bad capture fails loudly instead of silently landing on SMB as if it were good (see `gotcha_toybox_tar_gzip_truncation` memory).
+- **Settings overrides are applied at deploy time, not on the gold source.** `_settings_overrides.py`'s `SETTING_OVERRIDES` dict + `remove_thumbnail_path_substitution()` patch specific known-bad values in the extracted `userdata/` before pushing (currently: Arctic Fuse's `startup.enablehubpreloading` off, TMDbHelper's `max_threads` capped at 4, and a network-SMB thumbnail `pathsubstitution` removed so caching stays local). **Never hand-edit these directly on the gold source device** — encode the fix here instead and prove it on a disposable device first; the gold device is the one thing every future capture depends on (see `feedback_gold_device_protection` memory).
 
 ## Arctic Fuse 3 Home UI — HomeSwitcher + TMDbHelper Custom Nodes
 

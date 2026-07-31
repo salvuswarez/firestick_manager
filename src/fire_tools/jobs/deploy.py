@@ -8,6 +8,7 @@ from .._addon_policy import prune_addons
 from .._adb import AdbClient, AdbKeyStore
 from .._artifacts import GOLD_DEVICE_DIR, BackupRef, sanitize_device_name
 from .._kodi import check_device_online
+from .._settings_overrides import apply_setting_overrides, remove_thumbnail_path_substitution
 from .._smb import SmbClient
 from ..const import REMOTE_KODI_PATH
 from ..device_store import DeviceStore
@@ -82,6 +83,13 @@ def run_deploy(
         removed = prune_addons(extracted_path / "addons")
         if removed:
             handle.log(f"Removed {len(removed)} non-whitelisted addon(s): {', '.join(removed)}")
+
+        handle.check_cancelled()
+        handle.log("Applying known-good settings overrides...")
+        for change in apply_setting_overrides(extracted_path / "userdata"):
+            handle.log(f"  {change}")
+        if remove_thumbnail_path_substitution(extracted_path / "userdata"):
+            handle.log("  advancedsettings.xml: removed network thumbnail path substitution")
 
         handle.check_cancelled()
         handle.log(f"Deploying config to {ip}...")

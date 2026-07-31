@@ -23,6 +23,18 @@ SMB_STATE_DIR = "fire_tools_state"
 # not identical sets.
 PRE_CAPTURE_PRUNE_PATHS = (
     "userdata/Thumbnails",
+    # Textures13.db indexes exactly the thumbnail files pruned above by
+    # path/hash - carrying it over without the files it references means a
+    # freshly-deployed device starts with a fully "populated" index pointing
+    # at nothing, and Kodi burns a burst of redundant network+disk activity
+    # at startup trying to reconcile every dead reference at once (observed
+    # 2026-07-30: 87 failed texture loads concurrent with PVR playlist
+    # loading, contributing to a low-memory kill - see
+    # gotcha_textures_db_stale_index memory). Dropping it lets Kodi rebuild
+    # the cache lazily, on demand, instead.
+    "userdata/Database/Textures13.db",
+    "userdata/Database/Textures13.db-wal",
+    "userdata/Database/Textures13.db-shm",
     "userdata/addon_data/plugin.video.themoviedb.helper/crop_v2",
     "userdata/addon_data/plugin.video.themoviedb.helper/blur_v3",
     "userdata/addon_data/plugin.video.themoviedb.helper/database_07",
@@ -69,6 +81,23 @@ BLOAT_PACKAGES = (
     # Ad targeting / content recognition
     "com.amazon.tv.acr", "com.amazon.ftvads.deeplinking",
     "com.amazon.hybridadidservice", "com.amazon.d3",
+    # Phone-home / comms backbone. Confirmed 2026-07-30 via live logcat:
+    # kindleautomatictimezone retry-loops against dcape-na.amazon.com
+    # (DNS-blocked at the router) via RetryingCallable; smarthomemapviewapp
+    # (Alexa smart-home camera discovery, unrelated to Kodi use) was caught
+    # in a repeated broadcast-triggered respawn/crash cycle. Not all of
+    # these are guaranteed to actually disable — some run under the system
+    # UID and Fire OS may block `pm disable-user` on them via a non-root
+    # shell (SecurityException); `pm disable-user` silently no-ops on
+    # failure here (see adb-device-ops skill), so verify with
+    # `pm list packages -d` after a maintain run rather than assuming.
+    "com.amazon.kindleautomatictimezone", "com.amazon.smarthomemapviewapp",
+    "com.amazon.dcp", "com.amazon.dcp.contracts.library",
+    "com.amazon.dcp.contracts.framework.library",
+    "com.amazon.tcomm", "com.amazon.tcomm.client", "com.amazon.tcomm.jackson",
+    "com.amazon.diode", "com.amazon.communication.discovery",
+    "com.amazon.sync.provider.ipc", "com.amazon.whisperplay.contracts",
+    "com.amazon.whisperplay.service.install",
     # Onboarding / tutorial / promotional nag screens
     "com.amazon.firehomestarter", "com.amazon.storm.lightning.tutorial",
     "com.amazon.tmm.tutorial", "com.amazon.tv.releasenotes",
@@ -79,6 +108,12 @@ BLOAT_PACKAGES = (
     # Reading/photos/kindle ecosystem, misc unused apps
     "com.amazon.ods.kindleconnect", "com.amazon.bueller.photos",
     "com.amazon.minitv.android.app",
+    # Placeholder/stub apps - fake tiles for content types Fire OS doesn't
+    # actually offer (e.g. a non-functional "Alarm Clock" launcher icon).
+    # Verified present on a real device and zero functional risk to disable.
+    "com.amazon.dummy.alarmclock", "com.amazon.dummy.calendar",
+    "com.amazon.dummy.contacts", "com.amazon.dummy.gallery",
+    "com.amazon.dummy.music", "com.amazon.dummy.settings",
     # OTA update mechanism (deliberately disabled - see original list)
     "com.amazon.device.software.ota", "com.amazon.device.software.ota.override",
     "com.amazon.kindle.otter.oobe.corp.ad",
