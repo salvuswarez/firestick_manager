@@ -1,6 +1,7 @@
 """Capture job: archive a device's Kodi profile and upload it to SMB."""
 from __future__ import annotations
 
+import gzip
 import os
 import shlex
 from datetime import datetime
@@ -77,10 +78,21 @@ def run_capture(
 
         handle.check_cancelled()
         handle.log("Creating tar.gz on device...")
+        # Deliberately two steps (`tar cf` then `gzip`), not `tar czf` in one
+        # shot: toybox's `tar -z` on this Fire OS build silently produces a
+        # truncated gzip stream (`tar` itself reports exit code 0, and the
+        # resulting archive is byte-identical whether pulled once or
+        # re-pulled fresh, so the corruption is baked in at creation time,
+        # not a transfer issue). Plain `tar cf` + a separate `gzip` pass
+        # verified clean (`tar tf` lists all entries, decompresses fully) on
+        # the same device — this is the reliable path, not a style choice.
+        device_tar_plain = device_tar.removesuffix(".gz")
         adb.shell(
-            f"tar czf {shlex.quote(device_tar)} "
-            f"-C {shlex.quote(os.path.dirname(REMOTE_KODI_PATH))} {ref.archive_root}"
+            f"tar cf {shlex.quote(device_tar_plain)} "
+            f"-C {shlex.quote(os.path.dirname(REMOTE_KODI_PATH))} {ref.archive_root}",
+            timeout_s=adb_keys.transfer_timeout_s,
         )
+        adb.shell(f"gzip {shlex.quote(device_tar_plain)}", timeout_s=adb_keys.transfer_timeout_s)
 
         handle.log("Pulling compressed archive...")
         local_tar = ref.local_path(ws)
@@ -88,6 +100,9 @@ def run_capture(
         adb.shell_ok(f"rm -f {shlex.quote(device_tar)}")
 
     handle.check_cancelled()
+    handle.log("Verifying archive integrity...")
+    _verify_gzip(local_tar)
+
     smb_remote = ref.smb_remote(config.smb_backup_dir)
     handle.log(f"Uploading to SMB: {smb_remote}")
     smb.makedirs(f"{config.smb_backup_dir}/{device_dir}")
@@ -97,3 +112,23 @@ def run_capture(
 
     handle.log(f"Captured and saved: {smb_remote}")
     return smb_remote
+
+
+def _verify_gzip(path: Path) -> None:
+    """Fail loudly if `path` is a truncated/corrupt gzip stream.
+
+    A capture that "succeeds" (no ADB exception) can still produce a
+    truncated archive if the on-device `tar czf` or the pull is cut short —
+    previously nothing checked this, so a bad archive got uploaded to SMB
+    as if it were good and only surfaced as a failure much later, on an
+    unrelated device's deploy.
+
+    RAISES:
+        RuntimeError: If the archive cannot be fully decompressed.
+    """
+    try:
+        with gzip.open(path, "rb") as f:
+            while f.read(1024 * 1024):
+                pass
+    except (OSError, EOFError) as exc:
+        raise RuntimeError(f"Captured archive is truncated or corrupt: {exc}") from exc

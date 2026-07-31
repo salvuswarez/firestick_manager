@@ -184,11 +184,18 @@ class AdbClient:
             except Exception:
                 LOGGER.debug("Error closing ADB connection to %s", self._ip, exc_info=True)
 
-    def shell(self, cmd: str) -> str:
+    def shell(self, cmd: str, timeout_s: float | None = None) -> str:
         """Run a shell command and raise if it fails.
 
         PARAMETERS:
             cmd (str): Shell command to execute on the device.
+            timeout_s (float | None): Override for this call's transport/read
+                timeout. Defaults to `AdbKeyStore.shell_timeout_s`. Pass a
+                larger value for a command whose duration scales with data
+                size rather than being a quick fixed-cost operation (e.g.
+                `tar czf` over a large userdata dir) — capture.py's tar step
+                previously used the flat 60s default and could silently
+                truncate the archive on a slower/larger device.
 
         RETURNS:
             str: Command output, stripped.
@@ -199,7 +206,7 @@ class AdbClient:
                 empty string, so callers cannot mistake failure for success.
         """
         try:
-            timeout = self._key_store.shell_timeout_s
+            timeout = timeout_s if timeout_s is not None else self._key_store.shell_timeout_s
             output = self._device.shell(cmd, transport_timeout_s=timeout, read_timeout_s=timeout)
         except Exception as exc:
             raise AdbCommandError(f"ADB command failed for {self._ip} ({cmd}): {exc}") from exc
