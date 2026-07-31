@@ -1,6 +1,8 @@
 """Deploy job: push a backup (or the latest one) to a device."""
 from __future__ import annotations
 
+import json
+import logging
 import tarfile
 from pathlib import Path
 
@@ -8,13 +10,15 @@ from .._adb import AdbClient, AdbKeyStore
 from .._addon_policy import prune_addons
 from .._artifacts import GOLD_DEVICE_DIR, BackupRef, sanitize_device_name
 from .._hub_layout import apply_hub_layout
-from .._kodi import check_device_online
+from .._kodi import check_device_online, collect_kodi_metadata
 from .._settings_overrides import apply_setting_overrides, remove_thumbnail_path_substitution
 from .._smb import SmbClient
 from ..const import REMOTE_KODI_PATH
 from ..device_store import DeviceStore
 from ..models import SmbConfig
 from ..operations import OperationHandle
+
+LOGGER = logging.getLogger(__name__)
 
 _BASE_APK_NAME = "kodi-latest.apk"
 _DEVICE_APK_PATH = "/sdcard/kodi-latest.apk"
@@ -139,6 +143,20 @@ def resolve_base_apk(ws: Path, smb: SmbClient, config: SmbConfig) -> Path | None
     return local_apk
 
 
+def _base_apk_version(smb: SmbClient, config: SmbConfig) -> str:
+    """RETURNS: str: Kodi version recorded for the published base APK, or `""`.
+
+    Written by the fetch-base job alongside the APK; read here so deploy can
+    tell whether pushing it would actually change anything.
+    """
+    try:
+        meta = json.loads(smb.read_text(f"{config.smb_backup_dir}/{GOLD_DEVICE_DIR}/kodi-latest.meta.json"))
+    except Exception as exc:
+        LOGGER.debug("No readable base APK meta: %s", exc)
+        return ""
+    return str(meta.get("kodi_version") or "")
+
+
 def _install_base_apk(
     handle: OperationHandle,
     ws: Path,
@@ -147,12 +165,30 @@ def _install_base_apk(
     adb: AdbClient,
     base_apk_local: Path | None,
 ) -> None:
+    """Install the shared base Kodi APK, unless the device already runs it.
+
+    The version check exists because this used to push the APK on *every*
+    deploy regardless of what was installed — roughly 100MB over ADB each
+    time, for no change in the common case where the whole fleet is already
+    on the base version. On a device with marginal wifi that push exceeded
+    the 180s transfer timeout and failed the entire deploy before any config
+    was written (observed on a real device pushing Kodi 21.3 over an
+    already-installed Kodi 21.3).
+    """
+    installed = collect_kodi_metadata(adb).get("kodi_version", "")
+    base_version = _base_apk_version(smb, config)
+    if installed and base_version and installed == base_version:
+        handle.log(f"Kodi {installed} already installed, skipping APK push")
+        return
+
     if base_apk_local is None:
         base_apk_local = resolve_base_apk(ws, smb, config)
     if base_apk_local is None:
         handle.log("No base APK found on SMB, skipping Kodi install")
         return
-    handle.log("Base Kodi APK found, installing...")
+
+    detail = f"{installed or 'unknown'} -> {base_version or 'unknown'}"
+    handle.log(f"Installing base Kodi APK ({detail})...")
     adb.push_file(str(base_apk_local), _DEVICE_APK_PATH)
     adb.shell(f"pm install -r {_DEVICE_APK_PATH}")
     adb.shell_ok(f"rm -f {_DEVICE_APK_PATH}")
