@@ -1,6 +1,6 @@
 [project]
 name = "firestick-manager"
-version = "0.1.8"
+version = "0.1.9"
 description = "manages kodi and other apps for firestick devices"
 authors = [
     {name = "salvuswarez",email = "60023924+salvuswarez@users.noreply.github.com"}
