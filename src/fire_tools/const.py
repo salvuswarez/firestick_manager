@@ -6,6 +6,13 @@ ADB_PORT = 5555
 REMOTE_KODI_PATH = "/sdcard/Android/data/org.xbmc.kodi/files/.kodi"
 ARCHIVE_ROOT = ".kodi"
 
+# Kodi display calibration (resolution index + overscan), read by
+# `_kodi.collect_kodi_display_settings` and patched by
+# `jobs.display.patch_display_settings` — shared so a captured value and a
+# manually-applied one describe the same file/fields.
+REMOTE_GUISETTINGS_PATH = f"{REMOTE_KODI_PATH}/userdata/guisettings.xml"
+KODI_OVERSCAN_FIELDS = ("left", "top", "right", "bottom")
+
 KODI_MIRROR_BASE_URL = "https://mirrors.kodi.tv/releases/android/arm/"
 
 # SMB (router-USB / NAS) defaults — override via .env (CLI) or the HA config

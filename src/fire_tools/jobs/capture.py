@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .._adb import AdbClient, AdbKeyStore
 from .._artifacts import GOLD_DEVICE_DIR, BackupRef, sanitize_device_name, validate_backup_name
-from .._kodi import collect_kodi_metadata
+from .._kodi import collect_kodi_display_settings, collect_kodi_metadata
 from .._smb import SmbClient
 from ..const import PRE_CAPTURE_PRUNE_PATHS, REMOTE_KODI_PATH
 from ..device_store import DeviceStore
@@ -36,7 +36,9 @@ def run_capture(
         ip (str): Target device IP.
         backup_name (str | None): Validated single-segment name, or None to
             auto-generate `.kodi_<timestamp>`.
-        devices (DeviceStore): Used to resolve the device's display name.
+        devices (DeviceStore): Used to resolve the device's display name and
+            to persist its live display calibration (see `Device.display`),
+            if it's already a known device.
         adb_keys (AdbKeyStore): Shared ADB signer cache.
         smb (SmbClient): Configured SMB client.
         config (SmbConfig): Resolved SMB backup directory.
@@ -71,6 +73,9 @@ def run_capture(
             android_version=meta.get("android_version", ""),
         )
 
+        handle.log("Reading display calibration...")
+        display_settings = collect_kodi_display_settings(adb)
+
         handle.check_cancelled()
         handle.log("Cleaning cache junk on-device...")
         for rel_path in PRE_CAPTURE_PRUNE_PATHS:
@@ -98,6 +103,9 @@ def run_capture(
         local_tar = ref.local_path(ws)
         adb.pull(device_tar, str(local_tar))
         adb.shell_ok(f"rm -f {shlex.quote(device_tar)}")
+
+    if display_settings and devices.update_display(ip, display_settings):
+        handle.log(f"Recorded display calibration: {display_settings}")
 
     handle.check_cancelled()
     handle.log("Verifying archive integrity...")

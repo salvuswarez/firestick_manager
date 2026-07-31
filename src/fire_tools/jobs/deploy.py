@@ -17,6 +17,7 @@ from ..const import REMOTE_KODI_PATH
 from ..device_store import DeviceStore
 from ..models import SmbConfig
 from ..operations import OperationHandle
+from .display import patch_display_settings, validate_display_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +45,9 @@ def run_deploy(
         ip (str): Target device IP.
         backup_name (str | None): Validated `device_dir/filename` reference,
             or None to deploy the device's most recent backup.
-        devices (DeviceStore): Used to resolve the device's display name.
+        devices (DeviceStore): Used to resolve the device's display name and
+            any stored resolution/overscan calibration (see `Device.display`,
+            captured by `jobs.capture` and reapplied here after sync).
         adb_keys (AdbKeyStore): Shared ADB signer cache.
         smb (SmbClient): Configured SMB client.
         config (SmbConfig): Resolved SMB backup directory.
@@ -112,6 +115,16 @@ def run_deploy(
                 handle.log(f"Syncing {folder}...")
                 pushed, removed_count = adb.sync_tree(str(local), f"{REMOTE_KODI_PATH}/{folder}")
                 handle.log(f"  {folder}: {pushed} changed, {removed_count} removed, rest unchanged")
+
+        if dev and dev.display:
+            handle.check_cancelled()
+            try:
+                validate_display_settings(dev.display)
+            except ValueError as exc:
+                handle.log(f"Stored display calibration invalid, skipping: {exc}")
+            else:
+                handle.log("Reapplying stored display calibration...")
+                patch_display_settings(adb, dev.display, handle)
 
     handle.log(f"Deployment finished for {ip}")
     return f"Deployed to {ip}"

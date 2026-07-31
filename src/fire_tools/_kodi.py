@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import re
 import socket
+from typing import Any
 
 from ._adb import AdbClient
-from .const import ADB_PORT, REMOTE_KODI_PATH
+from .const import ADB_PORT, KODI_OVERSCAN_FIELDS, REMOTE_GUISETTINGS_PATH, REMOTE_KODI_PATH
 
 
 def check_device_online(ip: str, timeout: float = 3.0) -> bool:
@@ -59,3 +60,41 @@ def collect_kodi_metadata(adb: AdbClient) -> dict[str, str]:
                     meta["arctic_fuse"] = match.group(1)
                     return meta
     return meta
+
+
+def collect_kodi_display_settings(adb: AdbClient) -> dict[str, Any]:
+    """Read Kodi's active resolution index and overscan calibration from guisettings.xml.
+
+    Kodi only writes a setting to `guisettings.xml` when it differs from the
+    default, so a device that's never been manually calibrated legitimately
+    has neither value present — that's reported as an empty dict, not an
+    error, matching the `display_settings` shape `jobs.display` reads/writes.
+
+    PARAMETERS:
+        adb (AdbClient): An already-connected ADB client for the device.
+
+    RETURNS:
+        dict[str, Any]: `{"resolution_index": int, "overscan": {"left": int,
+        "top": int, "right": int, "bottom": int}}`, with `resolution_index`
+        and/or `overscan` omitted if not found in the file.
+    """
+    xml = adb.shell_ok(f"cat {REMOTE_GUISETTINGS_PATH}")
+    if not xml:
+        return {}
+
+    settings: dict[str, Any] = {}
+    match = re.search(r'<setting id="videoscreen\.resolution">(-?\d+)</setting>', xml)
+    if match:
+        settings["resolution_index"] = int(match.group(1))
+
+    # First occurrence only, matching `patch_display_settings`'s assumption
+    # that the first <resolutions> entry is the active one.
+    overscan: dict[str, int] = {}
+    for field_name in KODI_OVERSCAN_FIELDS:
+        field_match = re.search(rf"<{field_name}>(-?\d+)</{field_name}>", xml)
+        if field_match:
+            overscan[field_name] = int(field_match.group(1))
+    if overscan:
+        settings["overscan"] = overscan
+
+    return settings

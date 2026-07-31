@@ -5,4 +5,4 @@ Deploy a Kodi backup to one or all devices. Argument: `$ARGUMENTS` is a device I
 3. Run `uv run fire-tools deploy $ARGUMENTS [--backup ...]`.
 4. Report per-device success/failure. Note: the base Kodi APK is installed automatically if `gold/kodi-latest.apk` exists on the SMB share — there is no `--update`/`--prep` flag anymore (both were removed in the SMB-based rewrite).
 
-Use the `kodi-gold-config` skill for the current capture/deploy flow, and `devices-config` for per-device `resolution` overrides. This pushes real config to a live device — confirm scope with the user before running, don't default to `--batch` silently.
+Use the `kodi-gold-config` skill for the current capture/deploy flow, and `devices-config` for per-device `display` (resolution_index/overscan) calibration — captured automatically during `capture`, reapplied automatically during `deploy`. This pushes real config to a live device — confirm scope with the user before running, don't default to `--batch` silently.

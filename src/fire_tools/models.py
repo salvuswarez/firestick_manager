@@ -26,7 +26,11 @@ class Device(BaseModel):
         model (str): Android product model string.
         serial (str): ADB serial number.
         android_version (str): Android release string (e.g. "9").
-        display (dict[str, Any]): Reserved for future display metadata; unused today.
+        display (dict[str, Any]): Kodi resolution/overscan calibration —
+            `{"resolution_index": int, "overscan": {"left": int, "top": int,
+            "right": int, "bottom": int}}`, both optional. Captured live from
+            the device by `jobs.capture` and reapplied by `jobs.deploy` after
+            every sync; empty if never captured or calibrated.
     """
 
     model_config = ConfigDict(extra="ignore")

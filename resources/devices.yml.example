@@ -2,8 +2,11 @@
 # `uv run fire-tools scan` to auto-populate it. devices.yml is gitignored —
 # it accumulates real MAC addresses/IPs from your network, never commit it.
 #
-# `ip`/`mac`/`name` are written by `scan`. `resolution` is never written by
-# scan — hand-add it only if a device needs a non-default Kodi resolution.
+# `ip`/`mac`/`name` are written by `scan`. `display` is written by `capture`
+# (reads the device's live guisettings.xml) and reapplied by `deploy` after
+# every sync — hand-add it only to pre-seed calibration before a first
+# capture, or run `uv run fire-tools apply-display <ip> --resolution-index
+# ... --overscan ...` to set it live and let the next capture record it.
 
 devices:
   - ip: 192.168.1.50
@@ -12,4 +15,10 @@ devices:
   - ip: 192.168.1.51
     mac: aa:bb:cc:dd:ee:00
     name: Another Example Fire TV
-    resolution: "1920x1080"
+    display:
+      resolution_index: 16
+      overscan:
+        left: 0
+        top: 0
+        right: 1920
+        bottom: 1080
