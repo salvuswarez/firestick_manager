@@ -25,6 +25,16 @@ SETTING_OVERRIDES: dict[str, dict[str, str]] = {
         # Was `true`: preloaded every HomeSwitcher tab's widgets at Kodi
         # startup instead of only the visible one.
         "startup.enablehubpreloading": "false",
+        # Tab renames to match the layout in `_hub_layout.py`. Arctic Fuse
+        # stores each of these under BOTH a lowercase and a PascalCase key
+        # (an artifact of a skin-version migration) and reads whichever it
+        # finds, so both spellings must be set or the tab keeps its old name.
+        "homeswitcher.1102.name": "Series",
+        "HomeSwitcher.1102.Name": "Series",
+        "HomeSwitcher.1102.Shortcut.label": "Series",
+        "homeswitcher.1104.name": "Discover",
+        "HomeSwitcher.1104.Name": "Discover",
+        "HomeSwitcher.1104.Shortcut.label": "Discover",
     },
     "addon_data/plugin.video.themoviedb.helper/settings.xml": {
         # Was `10`: allowed up to 10 concurrent background discover/image

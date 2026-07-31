@@ -4,9 +4,10 @@ from __future__ import annotations
 import tarfile
 from pathlib import Path
 
-from .._addon_policy import prune_addons
 from .._adb import AdbClient, AdbKeyStore
+from .._addon_policy import prune_addons
 from .._artifacts import GOLD_DEVICE_DIR, BackupRef, sanitize_device_name
+from .._hub_layout import apply_hub_layout
 from .._kodi import check_device_online
 from .._settings_overrides import apply_setting_overrides, remove_thumbnail_path_substitution
 from .._smb import SmbClient
@@ -90,6 +91,11 @@ def run_deploy(
             handle.log(f"  {change}")
         if remove_thumbnail_path_substitution(extracted_path / "userdata"):
             handle.log("  advancedsettings.xml: removed network thumbnail path substitution")
+
+        handle.check_cancelled()
+        handle.log("Regenerating home-screen hub layout...")
+        for change in apply_hub_layout(extracted_path / "userdata"):
+            handle.log(f"  {change}")
 
         handle.check_cancelled()
         handle.log(f"Deploying config to {ip}...")

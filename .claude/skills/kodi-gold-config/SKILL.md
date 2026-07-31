@@ -59,6 +59,21 @@ Each `list` entry is one row in the hub. `path` is either:
 
 Add `"widget": "True"` on a row to mark it widget-eligible (thin horizontal scroller) rather than a full browse page.
 
+### 1b. The three layers (and how they drift)
+
+A hub is defined across **three** separate files, and the captured gold config had them out of sync (e.g. Movies listed 7 rows as a node but only 4 as widgets):
+
+| Layer | Path | What it controls |
+|---|---|---|
+| HomeSwitcher slot | `skin.arctic.fuse.3/settings.xml` | the top-level tab itself (name, icon, target) |
+| Submenu | `script.skinvariables/nodes/skin.arctic.fuse.3/skinvariables-shortcut-<slot>submenu.json` | sub-tabs, each with nested rows |
+| Widgets | `…/skinvariables-shortcut-<slot>widgets.json` | the rows rendered on the home screen |
+| Node | `plugin.video.themoviedb.helper/nodes/<name>.json` | what shows when you navigate *into* the hub |
+
+`_hub_layout.py` generates the last three from one `HUBS` definition so they can't drift. Schema notes verified against real device files: a submenu parent is `{label, path:"Custom_Submenu", icon, target:"", guid, submenu:[…]}`; a child is `{label, path, icon, target:"videos", guid}`; **every submenu ends with a blank entry** (`label:""`, `submenu:[]`, `widgets:[]`, a guid) — that's the skin's own "add item" affordance, *not* stray data, so generated files reproduce it. `guid`s are `guid-<8 hex>`; `_hub_layout.py` derives them deterministically from the label so regenerating an unchanged hub is byte-identical and `sync_tree` won't re-push it.
+
+**Slot 1104 had no submenu file at all** — that's why it was a flat wall of ten live TMDb queries with zero local content, and why it preceded an OOM kill. Managed slots are `home/1101/1102/1104`; **1103 (Crime), 1107 (Live TV/IPTV) and 1108 are deliberately never touched.**
+
 ### 2. HomeSwitcher tab wiring (`skin.arctic.fuse.3/settings.xml`)
 
 Each home tab is a numeric slot (observed: `1101`–`1104`, plus a fixed `Home` slot). Settings keys appear in **both** lowercase and `PascalCase` forms in the same file (skin-version artifact — preserve both if editing by hand, don't assume one is dead):
