@@ -1,49 +1,79 @@
 ---
 name: kodi-gold-config
-description: The Kodi "gold config" capture → prep → deploy workflow, and the JUNK_PATHS / WHITELIST_ADDONS / REQUIRED_PREFIXES pruning semantics. Use when working with .kodi_<timestamp> builds, capturing or deploying Kodi config, or editing the addon-pruning rules in glossary.py.
+description: The Kodi "gold config" capture → SMB → deploy workflow, plus the Arctic Fuse 3 home-UI (HomeSwitcher tabs + TMDbHelper custom nodes) schema for building out sections/genres programmatically. Use when working with captures/deploys, Kodi backups on the SMB share, or adding/editing Arctic Fuse home tabs, widgets, or TMDbHelper hubs.
 ---
 
 # Kodi Gold-Config Workflow
 
-"Gold config" is a known-good Kodi setup (skin, addons, settings) captured from a real device and redeployed to others.
+"Gold config" is a known-good Kodi setup (skin, addons, settings) captured from a real device and redeployed to others. All of this lives under `src/fire_tools/jobs/` (`capture.py`, `deploy.py`) — there is no `core.py`/`KodiManager`/`glossary.py` anymore (that was an earlier architecture; see `architecture_job_pipeline.md` in project memory).
 
 ## Lifecycle
 
 ```
-capture <ip>  ─→  assets/.kodi_<timestamp>/   (raw pull, untouched)
-                        │
-                        │  deploy --prep  (optional, local-only cleanup)
-                        ▼
-                  _prep_local_config()        (prunes in place)
-                        │
-                        ▼
-              deploy <ip> [--update]          (push addons/userdata/media)
+capture <ip>  ─→  tar czf on-device  ─→  adb pull to staging  ─→  upload to SMB
+                                                                        │
+deploy <ip> [--backup dev/file.tar.gz]  ─→  download from SMB  ─→  extract
+    ─→  prune addons to whitelist  ─→  sync addons/userdata/media (hash-diff, not full wipe)
 ```
 
-- **Capture never destroys anything.** `KodiManager.capture_gold_image()` always creates a brand-new `assets/.kodi_<YYYYMMDD_HHMMSS>/` folder via `adb pull`. Nothing is ever overwritten by a capture.
-- **Prep is opt-in and local-only.** `_prep_local_config()` only runs when `deploy` is called with `--prep`. It is NOT run automatically after capture (the call is present but commented out in `capture_gold_image`).
-- **`get_latest_build()` picks the most recent build by sorting folder names** — this works only because the naming is `.kodi_YYYYMMDD_HHMMSS` (lexical sort == chronological sort). A manually-marked "gold" folder like `archive/.kodi_gold_20260410_072207/` is NOT picked up by this sort unless it's moved/renamed into the `assets/` tree with a compliant timestamp name.
+- **No local `assets/`/`archive/` anymore.** Both jobs use a per-operation staging dir (`ws: Path`, under `~/.fire_tools/staging/`) that's cleaned up after the job — nothing is retained locally. The archive lives only on the SMB share (`SmbConfig.smb_backup_dir`, default `"backups"`; the HA integration's default is `"kodi-wan/ha_storage/backups"` — check which one your `.env`/config entry actually points at, see `const.py`'s note on this).
+- **Addon pruning is back**, reintroduced 2026-07-30 in `_addon_policy.py` (`WHITELIST_ADDONS`/`REQUIRED_PREFIXES`, rebuilt from what's actually installed on the gold device rather than the old stale `glossary.py` list). `deploy.py` calls `prune_addons()` on the extracted `addons/` folder before pushing — anything not whitelisted (by exact name or a generic prefix like `script.module.`/`service.`/`metadata.`/`resource.`/`inputstream.`/`repository.`) is deleted from the local extracted copy first. Capture itself still doesn't prune addons — only on-device cache/thumbnail junk (`PRE_CAPTURE_PRUNE_PATHS`) before tarring — so a capture stays a faithful full snapshot; filtering happens at deploy time only.
+- **Deploy no longer wipes and re-pushes everything.** `AdbClient.sync_tree()` (`_adb.py`, replacing the old `push_tree`) hashes both sides (`find ... -exec md5sum {} +` on-device, `hashlib.md5` locally) and only pushes new/changed files, removing remote files with no local counterpart — same end state as the old full wipe, without re-transferring unchanged files over ADB on every run.
+- **Base Kodi APK install is automatic**, not flag-gated, and reused across a `--batch` run: `deploy.py`'s `resolve_base_apk()` downloads `gold/kodi-latest.apk` from SMB once; `cli.py`'s `deploy` command resolves it a single time and passes the same local file into every device's `run_deploy` call (`base_apk_local=`) instead of re-downloading per device. `service.py`'s `deploy_all()` (used by the HA integration) does not yet share this optimization — each concurrently-dispatched job still resolves its own copy; left as a known scope gap since coordinating a shared file's lifetime across concurrent background threads is a materially different problem than the CLI's sequential loop.
+- **`BackupRef` (`_artifacts.py`) owns naming** — `device_dir/filename.tar.gz`, where `device_dir` is `sanitize_device_name(device.name)` (or `"gold"` for the shared base image). Latest-backup resolution sorts `.tar.gz` filenames lexically among SMB `scandir` results, which works because names are `.kodi_YYYYMMDD_HHMMSS.tar.gz`.
 
-## Pruning Rules (`_prep_local_config`, `glossary.py`)
+## Arctic Fuse 3 Home UI — HomeSwitcher + TMDbHelper Custom Nodes
 
-Two independent passes, both looking under a captured build folder:
+Arctic Fuse 3 does **not** use `script.skinshortcuts` (that's an older-skin pattern) — its home-tab system is built into the skin itself, called **HomeSwitcher**, and content comes from **TMDbHelper custom nodes**. This is what the skin's own in-Kodi settings UI edits when you add a section like "Genres" or "New TV" — both pieces below can be hand-authored/scripted instead of going through that UI.
 
-1. **Addon pruning** — walks `<build>/addons/`. A folder survives if it's in `WHITELIST_ADDONS` (explicit allow-list, e.g. `plugin.video.umbrella`, `skin.arctic.fuse.3`) OR its name starts with one of `REQUIRED_PREFIXES` (`script.module.`, `service.`, `metadata.`, `resource.`, `inputstream.`, etc. — protects engine/dependency addons generically). Anything else is `shutil.rmtree`'d.
-2. **Junk-path cleanup** — removes each entry in `JUNK_PATHS` relative to the build root. Supports a wildcard suffix (`addons/packages/*` empties and recreates the parent dir) and otherwise removes files/dirs outright (e.g. `userdata/Database/Textures13.db`, `userdata/Thumbnails`, per-addon cache subfolders).
+### 1. TMDbHelper custom node (the actual content)
 
-**When adding a new addon to the gold build**: add it to `WHITELIST_ADDONS` (exact folder name) or, if it's a dependency/engine addon, check whether an existing `REQUIRED_PREFIXES` entry already protects it before adding a new one-off whitelist entry.
+A JSON file under `userdata/addon_data/plugin.video.themoviedb.helper/nodes/<name>.json`:
 
-**When trimming disk usage further**: add to `JUNK_PATHS`, not to the addon whitelist logic — junk paths are for cache/log/thumbnail bloat, not addon lifecycle.
+```json
+{
+  "name": "GENRES HUB",
+  "icon": "special://home/addons/plugin.video.themoviedb.helper/resources/icons/white/genres.png",
+  "list": [
+    {
+      "name": "Comedy Series",
+      "icon": "special://home/addons/plugin.video.themoviedb.helper/resources/icons/themoviedb/tv.png",
+      "path": "plugin://plugin.video.themoviedb.helper/?info=discover&with_id=True&tmdb_type=tv&with_genres=35&sort_by=popularity.desc&vote_count.gte=100&widget=True"
+    },
+    {
+      "name": "Continue Watching",
+      "path": "library://video/tvshows/inprogressshows.xml/",
+      "widget": "True"
+    }
+  ]
+}
+```
 
-## Deploy Sequence (`KodiManager.deploy_config`)
+Each `list` entry is one row in the hub. `path` is either:
+- `plugin://plugin.video.themoviedb.helper/?info=discover&...` — a live TMDb discover query. Common params: `tmdb_type=movie|tv`, `with_genres=<TMDB genre id>` (pipe `%7C` = OR, e.g. `28%7C12`), `with_networks=<id>` (e.g. `213`=Netflix, `49%7C3186`=HBO/Max, `2552`=Apple TV+), `sort_by=popularity.desc` / `first_air_date.desc`, `vote_count.gte=<N>` (quality floor), `first_air_date.lte=T-0&first_air_date.gte=T-90` (relative-date window, e.g. for "new releases" in the last 90 days), `with_original_language=en`, `widget=True`.
+- `plugin://plugin.video.themoviedb.helper/?info=dir_custom_node&filename=<other>.json&basedir=special%3A%2F%2Fprofile%2Faddon_data%2Fplugin.video.themoviedb.helper%2Fnodes%2F&widget=true` — links to another node file (nesting hubs).
+- `library://video/tvshows/inprogressshows.xml/` — a built-in Kodi library smartlist (no TMDbHelper involved).
 
-1. Device prep: `debloat()` → `optimize_system()` → `disable_telemetry()` (always runs, not gated by any flag)
-2. If `install_apk=True` and `assets/latest_kodi.apk` exists: `adb install -r`
-3. Resolve `get_latest_build()` under `assets/.kodi/` — bails with an error message if none found
-4. Force-stop Kodi, `rm -rf` + recreate the remote `.kodi` dir
-5. Push `addons/`, `userdata/`, `media/` folders individually (skips any that don't exist locally)
-6. Apply per-device resolution if one was passed (see `devices-config` skill)
+Add `"widget": "True"` on a row to mark it widget-eligible (thin horizontal scroller) rather than a full browse page.
+
+### 2. HomeSwitcher tab wiring (`skin.arctic.fuse.3/settings.xml`)
+
+Each home tab is a numeric slot (observed: `1101`–`1104`, plus a fixed `Home` slot). Settings keys appear in **both** lowercase and `PascalCase` forms in the same file (skin-version artifact — preserve both if editing by hand, don't assume one is dead):
+
+```
+HomeSwitcher.<slot>.Name           = "Genres"
+HomeSwitcher.<slot>.Shortcut.Path  = plugin://plugin.video.themoviedb.helper/?info=dir_custom_node&filename=genres_hub.json&basedir=special%3A%2F%2Fprofile%2Faddon_data%2Fplugin.video.themoviedb.helper%2Fnodes%2F&reload=%24INFO%5BWindow%28Home%29.Property%28TMDbHelper.Widgets.Reload%29%5D&widget=true
+HomeSwitcher.<slot>.Shortcut.label = "Genres"
+HomeSwitcher.<slot>.Shortcut.icon  = image://<url-encoded local icon path>/
+HomeSwitcher.<slot>.Spotlight.Path = plugin://plugin.video.themoviedb.helper/?info=trending_day&tmdb_type=tv&reload=$INFO[Window(Home).Property(TMDbHelper.Widgets.Reload)]&widget=true
+```
+
+`Shortcut.Path` is the tab's main content (points at a node file via `dir_custom_node`); `Spotlight.Path` is the background/banner widget shown behind the tab (usually a canned `info=` query like `trending_day`/`now_playing`/`popular`, not a custom node). The `reload=$INFO[Window(Home).Property(TMDbHelper.Widgets.Reload)]` suffix is what makes TMDbHelper refresh the widget on skin reload — keep it on any path used as a Shortcut/Spotlight.
+
+**To add a new home section by hand**: write the node JSON under `nodes/`, then add a new `HomeSwitcher.<next-free-slot>.*` block in `settings.xml` pointing `Shortcut.Path` at it. Both files are plain text/JSON — no need to go through Arctic Fuse's or TMDbHelper's own configuration wizard. Verify current slot numbers and exact key casing on the live device first (`adb pull .../skin.arctic.fuse.3/settings.xml`) since duplicate keys can exist from skin-version migrations.
+
+`_kodi.py`'s `collect_kodi_metadata()` checks `skin.arctic.fuse.3` first, then falls back to `.2`/unversioned — fixed 2026-07-30 after it was found always checking the older skin IDs and silently missing the actual target skin (see `reference_kodi_target.md`). Verified against a live device: resolves to e.g. `3.2.15`.
 
 ## Argument: $ARGUMENTS
 
-If a build name or device IP is given, walk through that specific capture/deploy scenario. Otherwise explain the general workflow.
+If a build name, device IP, or a specific home-UI section is given, walk through that specific capture/deploy/UI-build scenario. Otherwise explain the general workflow.

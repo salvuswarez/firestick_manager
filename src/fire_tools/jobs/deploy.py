@@ -4,6 +4,7 @@ from __future__ import annotations
 import tarfile
 from pathlib import Path
 
+from .._addon_policy import prune_addons
 from .._adb import AdbClient, AdbKeyStore
 from .._artifacts import GOLD_DEVICE_DIR, BackupRef, sanitize_device_name
 from .._kodi import check_device_online
@@ -27,6 +28,7 @@ def run_deploy(
     adb_keys: AdbKeyStore,
     smb: SmbClient,
     config: SmbConfig,
+    base_apk_local: Path | None = None,
 ) -> str:
     """Deploy a backup archive (or the latest one for this device) to a device.
 
@@ -40,6 +42,10 @@ def run_deploy(
         adb_keys (AdbKeyStore): Shared ADB signer cache.
         smb (SmbClient): Configured SMB client.
         config (SmbConfig): Resolved SMB backup directory.
+        base_apk_local (Path | None): Pre-downloaded base APK to install.
+            Pass this when deploying to multiple devices in one run (see
+            `resolve_base_apk`) so the same file isn't re-fetched from SMB
+            once per device. If None, this job resolves it itself.
 
     RETURNS:
         str: Human-readable result summary.
@@ -57,7 +63,7 @@ def run_deploy(
     safe_name = sanitize_device_name(device_name)
 
     with AdbClient(ip, adb_keys) as adb:
-        _install_base_apk_if_present(handle, ws, smb, config, adb)
+        _install_base_apk(handle, ws, smb, config, adb, base_apk_local)
 
         handle.check_cancelled()
         ref = _resolve_backup_ref(handle, backup_name, safe_name, smb, config)
@@ -72,33 +78,68 @@ def run_deploy(
         extracted_path = ws / ref.archive_root
 
         handle.check_cancelled()
+        handle.log("Pruning addons to the gold whitelist...")
+        removed = prune_addons(extracted_path / "addons")
+        if removed:
+            handle.log(f"Removed {len(removed)} non-whitelisted addon(s): {', '.join(removed)}")
+
+        handle.check_cancelled()
         handle.log(f"Deploying config to {ip}...")
         adb.shell_ok("am force-stop org.xbmc.kodi")
-        adb.shell(f"rm -rf {REMOTE_KODI_PATH}")
         adb.shell(f"mkdir -p {REMOTE_KODI_PATH}")
 
         for folder in ("addons", "userdata", "media"):
             local = extracted_path / folder
             if local.exists():
-                handle.log(f"Pushing {folder}...")
-                adb.push_tree(str(local), f"{REMOTE_KODI_PATH}/{folder}")
+                handle.log(f"Syncing {folder}...")
+                pushed, removed_count = adb.sync_tree(str(local), f"{REMOTE_KODI_PATH}/{folder}")
+                handle.log(f"  {folder}: {pushed} changed, {removed_count} removed, rest unchanged")
 
     handle.log(f"Deployment finished for {ip}")
     return f"Deployed to {ip}"
 
 
-def _install_base_apk_if_present(
-    handle: OperationHandle, ws: Path, smb: SmbClient, config: SmbConfig, adb: AdbClient
-) -> None:
+def resolve_base_apk(ws: Path, smb: SmbClient, config: SmbConfig) -> Path | None:
+    """Download the shared base Kodi APK from SMB, if one has been published.
+
+    Split out from `_install_base_apk` so a batch deploy (`cli.py`'s
+    `--batch`, or any future fleet-wide caller) can resolve it once and pass
+    the same local file into every device's `run_deploy` call, instead of
+    downloading the same ~30-80MB file once per device.
+
+    PARAMETERS:
+        ws (Path): Staging directory to download into.
+        smb (SmbClient): Configured SMB client.
+        config (SmbConfig): Resolved SMB backup directory.
+
+    RETURNS:
+        Path | None: Local path to the downloaded APK, or None if no base
+        image has been published to SMB.
+    """
     base_smb_remote = f"{config.smb_backup_dir}/{GOLD_DEVICE_DIR}/{_BASE_APK_NAME}"
     local_apk = ws / _BASE_APK_NAME
     try:
         smb.download_file(base_smb_remote, str(local_apk))
     except OSError:
+        return None
+    return local_apk
+
+
+def _install_base_apk(
+    handle: OperationHandle,
+    ws: Path,
+    smb: SmbClient,
+    config: SmbConfig,
+    adb: AdbClient,
+    base_apk_local: Path | None,
+) -> None:
+    if base_apk_local is None:
+        base_apk_local = resolve_base_apk(ws, smb, config)
+    if base_apk_local is None:
         handle.log("No base APK found on SMB, skipping Kodi install")
         return
     handle.log("Base Kodi APK found, installing...")
-    adb.push_file(str(local_apk), _DEVICE_APK_PATH)
+    adb.push_file(str(base_apk_local), _DEVICE_APK_PATH)
     adb.shell(f"pm install -r {_DEVICE_APK_PATH}")
     adb.shell_ok(f"rm -f {_DEVICE_APK_PATH}")
     handle.log("Base Kodi installed")

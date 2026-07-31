@@ -37,8 +37,11 @@ resources/advancedsettings.xml
 # opencode scratch (real backup tarballs, crash logs, handoff notes)
 .opencode/temp/
 
-# Claude Code local-only settings
+# Claude Code local-only settings, scratch output, and memory (working
+# notes only — may reference real device details pulled during a session)
 .claude/settings.local.json
+.claude/temp/
+.claude/memory/
 
 # OS / editor
 .DS_Store

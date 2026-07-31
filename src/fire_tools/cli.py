@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import functools
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -135,13 +137,20 @@ def deploy(ip: str | None, batch: bool, backup: str | None) -> None:
     config = _build_config()
     keys = _adb_keys()
     smb = _smb(config)
-    for target_ip in targets:
-        click.echo(f"[*] Deploying to {target_ip}...")
-        result = _run(OperationType.DEPLOY, target_ip, functools.partial(
-            _deploy_job.run_deploy, ip=target_ip, backup_name=backup,
-            devices=device_store, adb_keys=keys, smb=smb, config=config,
-        ))
-        click.echo(f"[+++] {result}")
+
+    apk_cache_dir = Path(tempfile.mkdtemp(prefix="deploy_apk_", dir=str(_STAGING_ROOT)))
+    try:
+        base_apk_local = _deploy_job.resolve_base_apk(apk_cache_dir, smb, config)
+        for target_ip in targets:
+            click.echo(f"[*] Deploying to {target_ip}...")
+            result = _run(OperationType.DEPLOY, target_ip, functools.partial(
+                _deploy_job.run_deploy, ip=target_ip, backup_name=backup,
+                devices=device_store, adb_keys=keys, smb=smb, config=config,
+                base_apk_local=base_apk_local,
+            ))
+            click.echo(f"[+++] {result}")
+    finally:
+        shutil.rmtree(apk_cache_dir, ignore_errors=True)
 
 
 @main.command()

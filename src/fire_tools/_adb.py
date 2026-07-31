@@ -7,9 +7,12 @@ life of a job; `AdbKeyStore` loads the signer once and caches it.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
+import re
+import shlex
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +21,8 @@ from typing import Any, Protocol
 from .const import ADB_PORT
 
 LOGGER = logging.getLogger(__name__)
+
+_MD5_RE = re.compile(r"^[0-9a-f]{32}$")
 
 # adb_shell's AdbDeviceTcp.shell()/pull()/push() each take their own
 # transport_timeout_s/read_timeout_s per call — they do NOT inherit the
@@ -28,6 +33,7 @@ LOGGER = logging.getLogger(__name__)
 # multi-hundred-MB backup transfer — which is exactly what timed out mid-pull.
 _SHELL_TIMEOUT_S = 60.0
 _TRANSFER_TIMEOUT_S = 180.0
+_CHUNK_SIZE = 65536
 
 
 class AdbError(Exception):
@@ -247,30 +253,84 @@ class AdbClient:
         except Exception as exc:
             raise AdbCommandError(f"ADB push failed for {self._ip} ({remote_path}): {exc}") from exc
 
-    def push_tree(self, local_dir: str, remote_dir: str) -> None:
-        """Recursively push a local directory to the device.
+    def sync_tree(self, local_dir: str, remote_dir: str) -> tuple[int, int]:
+        """Push only new/changed files from `local_dir` to `remote_dir`, and
+        remove any remote file with no local counterpart, so the two trees
+        end up identical without re-transferring every unchanged file over
+        ADB (much slower than the SMB link a backup was already downloaded
+        over) on every single deploy.
 
-        This is the operation the original single-file `_adb_push` could
-        not perform — deploy previously tried to push extracted backup
-        folders (`addons/`, `userdata/`, `media/`) through a file-only push
-        and silently failed on every one.
+        Replaces the old `push_tree`, which unconditionally pushed every
+        file on every call — fine for a first deploy, wasteful for every
+        deploy after it.
 
         PARAMETERS:
-            local_dir (str): Local directory to push.
+            local_dir (str): Local directory to sync from.
             remote_dir (str): Destination directory on the device.
 
+        RETURNS:
+            tuple[int, int]: `(files pushed, files removed)`.
+
         RAISES:
-            AdbCommandError: If creating the remote directory or any file
+            AdbCommandError: If creating a remote directory or any file
                 push fails.
         """
-        self.shell(f"mkdir -p {remote_dir}")
-        for root, _dirs, files in os.walk(local_dir):
-            rel = os.path.relpath(root, local_dir)
-            remote_root = remote_dir if rel == "." else f"{remote_dir}/{rel.replace(os.sep, '/')}"
-            if rel != ".":
-                self.shell(f"mkdir -p {remote_root}")
-            for name in files:
-                self.push_file(os.path.join(root, name), f"{remote_root}/{name}")
+        remote_hashes = self._remote_file_hashes(remote_dir)
+        local_hashes = _local_file_hashes(local_dir)
+
+        to_push = sorted(rel for rel, digest in local_hashes.items() if remote_hashes.get(rel) != digest)
+        to_remove = sorted(rel for rel in remote_hashes if rel not in local_hashes)
+
+        for rel in to_remove:
+            self.shell_ok(f"rm -f {shlex.quote(f'{remote_dir}/{rel}')}")
+
+        for rel in to_push:
+            remote_path = f"{remote_dir}/{rel}"
+            parent = remote_path.rsplit("/", 1)[0]
+            self.shell(f"mkdir -p {shlex.quote(parent)}")
+            self.push_file(str(Path(local_dir) / rel), remote_path)
+
+        return len(to_push), len(to_remove)
+
+    def _remote_file_hashes(self, remote_dir: str) -> dict[str, str]:
+        """RETURNS: dict[str, str]: `{relative_path: md5_hex}` for every file
+        currently under `remote_dir`, or `{}` if it doesn't exist yet (e.g.
+        the first deploy to a fresh device).
+
+        Parses `md5sum`'s `<32-hex-digest><space(s)>[*]<path>` format by
+        position rather than splitting on whitespace, since real Kodi
+        profiles contain filenames with spaces (e.g. a TMDbHelper custom
+        node file literally named `TMDb Discover.json`, found on a live
+        device this session) that would otherwise be misparsed.
+        """
+        output = self.shell_ok(f"find {shlex.quote(remote_dir)} -type f -exec md5sum {{}} +")
+        prefix = f"{remote_dir}/"
+        hashes: dict[str, str] = {}
+        for line in output.splitlines():
+            digest = line[:32]
+            if len(line) < 34 or not _MD5_RE.match(digest):
+                continue
+            rest = line[32:]
+            path = rest[2:] if rest[:2] in ("  ", " *") else rest.lstrip()
+            if path.startswith(prefix):
+                hashes[path[len(prefix):]] = digest
+        return hashes
+
+
+def _local_file_hashes(local_dir: str) -> dict[str, str]:
+    """RETURNS: dict[str, str]: `{relative_path: md5_hex}` for every file
+    under `local_dir`, keyed with forward slashes to match the device side."""
+    hashes: dict[str, str] = {}
+    base = Path(local_dir)
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        digest = hashlib.md5()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(_CHUNK_SIZE), b""):
+                digest.update(chunk)
+        hashes[path.relative_to(base).as_posix()] = digest.hexdigest()
+    return hashes
 
 
 @dataclass(frozen=True, slots=True)

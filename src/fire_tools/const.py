@@ -43,16 +43,44 @@ MAINTENANCE_PRUNE_PATHS = (
     "addons/packages",
 )
 
-# Amazon/Fire OS bloat packages disabled during maintenance.
+# Amazon/Fire OS bloat packages disabled during maintenance. Goal: the
+# device should end up running essentially only Kodi + ExpressVPN +
+# YouTube (see `plugin.program.thecrewiz`/kodi-gold-config skill for the
+# Kodi-side equivalent, `_addon_policy.py`). Deliberately NOT touched:
+# `org.xbmc.kodi`, `com.amazon.firetv.youtube`, `com.expressvpn.vpn` (the
+# three apps meant to survive), core UI/input/connectivity (launcher,
+# settings, systemui, ime, bluetooth, wifi), and anything Alexa-voice
+# related (the physical remote's mic button depends on it — ask the user
+# before disabling any `com.amazon.alexa*`/`com.amazon.ale`/`com.amazon.aca`
+# package, since that's a functionality tradeoff, not pure bloat).
 BLOAT_PACKAGES = (
+    # Shopping / storefront
     "com.amazon.shoptv.client", "com.amazon.shoptv.firetv.client",
-    "com.amazon.alexashopping", "com.amazon.client.metrics",
-    "com.amazon.device.logmanager", "com.amazon.tv.fw.metrics",
-    "com.amazon.kso.blackbird", "com.amazon.bueller.photos",
+    "com.amazon.alexashopping", "com.amazon.venezia",
+    # Telemetry / usage metrics / crash reporting
+    "com.amazon.client.metrics", "com.amazon.device.logmanager",
+    "com.amazon.tv.fw.metrics", "com.amazon.kso.blackbird",
+    "com.amazon.minerva.client.api", "com.amazon.perfc",
+    "com.amazon.perfcollection", "com.amazon.csm.htmlruntime",
+    "com.amazon.wirelessmetrics.service", "com.amazon.device.crashmanager",
+    "com.amazon.device.metrics", "com.amazon.dp.logger",
     "com.amazon.recess", "com.amazon.tahoe", "com.amazon.ags.app",
-    "com.amazon.ods.kindleconnect", "com.amazon.logan",
-    "com.amazon.device.software.ota",
+    "com.amazon.logan", "com.amazon.firebat",
+    # Ad targeting / content recognition
+    "com.amazon.tv.acr", "com.amazon.ftvads.deeplinking",
+    "com.amazon.hybridadidservice", "com.amazon.d3",
+    # Onboarding / tutorial / promotional nag screens
+    "com.amazon.firehomestarter", "com.amazon.storm.lightning.tutorial",
+    "com.amazon.tmm.tutorial", "com.amazon.tv.releasenotes",
+    "com.amazon.systemnotices", "com.amazon.uxnotification",
+    "com.amazon.tv.notificationcenter", "com.amazon.whisperjoin.middleware.np",
+    # Prime Video specific (not used - Kodi/YouTube only)
+    "com.amazon.awvflingreceiver", "com.amazon.stillwatching.activity",
+    # Reading/photos/kindle ecosystem, misc unused apps
+    "com.amazon.ods.kindleconnect", "com.amazon.bueller.photos",
+    "com.amazon.minitv.android.app",
+    # OTA update mechanism (deliberately disabled - see original list)
+    "com.amazon.device.software.ota", "com.amazon.device.software.ota.override",
     "com.amazon.kindle.otter.oobe.corp.ad",
-    "com.amazon.firehomestarter", "com.amazon.venezia",
-    "com.amazon.avod", "com.amazon.firebat", "com.amazon.tv.nimble",
+    "com.amazon.avod", "com.amazon.tv.nimble",
 )

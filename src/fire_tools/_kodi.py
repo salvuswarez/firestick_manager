@@ -47,7 +47,7 @@ def collect_kodi_metadata(adb: AdbClient) -> dict[str, str]:
     build = adb.shell_ok("getprop ro.build.version.release")
     if build:
         meta["android_version"] = build.strip()
-    for skin in ("skin.arctic.fuse.2", "skin.arctic.fuse"):
+    for skin in ("skin.arctic.fuse.3", "skin.arctic.fuse.2", "skin.arctic.fuse"):
         addon_xml = adb.shell_ok(f"cat {REMOTE_KODI_PATH}/addons/{skin}/addon.xml")
         if not addon_xml:
             continue
