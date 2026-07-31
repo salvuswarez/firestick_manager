@@ -290,30 +290,51 @@ class FleetService:
         return backups
 
     def _list_backups_in(self, device_dir: str) -> list[dict[str, Any]]:
+        """RETURNS: list[dict]: Backup descriptors found under `device_dir`.
+
+        A failure here used to be swallowed silently, so a transient SMB
+        error produced a *short* listing rather than an error — backups
+        would simply vanish from `list-backups` and the HA panel's picker
+        with no indication anything had gone wrong. Failures are logged now,
+        and a bad entry drops only itself instead of the whole directory.
+        """
         result: list[dict[str, Any]] = []
         try:
-            for file_entry in self._smb.scandir(f"{self._config.smb_backup_dir}/{device_dir}"):
-                if not file_entry.name.endswith(".tar.gz"):
-                    continue
-                ref = BackupRef(device_dir=device_dir, filename=file_entry.name)
-                meta: dict[str, Any] = {}
+            entries = self._smb.scandir(f"{self._config.smb_backup_dir}/{device_dir}")
+        except Exception as exc:
+            LOGGER.warning("SMB list failed for %s: %s", device_dir, exc)
+            return result
+
+        for file_entry in entries:
+            if not file_entry.name.endswith(".tar.gz"):
+                continue
+            ref = BackupRef(device_dir=device_dir, filename=file_entry.name)
+            meta: dict[str, Any] = {}
+            try:
+                meta = json.loads(self._smb.read_text(ref.smb_meta_remote(self._config.smb_backup_dir)))
+            except Exception as exc:
+                LOGGER.debug("No/unreadable meta for %s: %s", ref.wire(), exc)
+
+            size = meta.get("size")
+            if not size:
+                # Only pay for an extra SMB round-trip when the sidecar
+                # didn't record a size; a failure here must not drop the
+                # backup from the listing entirely.
                 try:
-                    meta = json.loads(self._smb.read_text(ref.smb_meta_remote(self._config.smb_backup_dir)))
-                except Exception:
-                    pass
-                stat = file_entry.stat()
-                result.append({
-                    "filename": ref.wire(),
-                    "device_name": meta.get("device_name") or device_dir,
-                    "device_mac": meta.get("device_mac", ""),
-                    "size": str(meta.get("size") or stat.st_size or "?"),
-                    "date": meta.get("captured_at", ""),
-                    "kodi_version": meta.get("kodi_version", ""),
-                    "arctic_fuse": meta.get("arctic_fuse", ""),
-                    "android_version": meta.get("android_version", ""),
-                })
-        except Exception:
-            pass
+                    size = file_entry.stat().st_size
+                except Exception as exc:
+                    LOGGER.debug("stat failed for %s: %s", ref.wire(), exc)
+
+            result.append({
+                "filename": ref.wire(),
+                "device_name": meta.get("device_name") or device_dir,
+                "device_mac": meta.get("device_mac", ""),
+                "size": str(size or "?"),
+                "date": meta.get("captured_at", ""),
+                "kodi_version": meta.get("kodi_version", ""),
+                "arctic_fuse": meta.get("arctic_fuse", ""),
+                "android_version": meta.get("android_version", ""),
+            })
         return result
 
     def get_base_info(self) -> dict[str, Any]:

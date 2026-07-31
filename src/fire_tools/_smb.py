@@ -142,6 +142,18 @@ class SmbClient:
 
         self._call_with_retry(_download)
 
-    def scandir(self, remote: str) -> Iterator:
-        """RETURNS: Iterator: `smbclient.scandir` entries under `remote`."""
-        return self._call_with_retry(lambda: smbclient.scandir(self.path(remote)))
+    def scandir(self, remote: str) -> list:
+        """List directory entries under `remote`.
+
+        Deliberately materializes the listing *inside* the retry wrapper.
+        `smbclient.scandir` is a generator, so returning it unconsumed meant
+        `_call_with_retry` only guarded generator *creation* — a connection
+        going stale during iteration raised outside the retry, where callers
+        that catch broadly (e.g. `FleetService._list_backups_in`) turned it
+        into a silently short listing. That surfaced as backups randomly
+        missing from `list-backups` and from the HA panel's backup picker.
+
+        RETURNS:
+            list: `smbclient.scandir` entries under `remote`.
+        """
+        return self._call_with_retry(lambda: list(smbclient.scandir(self.path(remote))))
