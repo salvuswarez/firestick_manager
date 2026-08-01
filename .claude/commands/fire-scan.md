@@ -4,4 +4,4 @@ Scan the local network for Fire TV Sticks and refresh `resources/devices.yml`. A
 2. Show the resulting `resources/devices.yml` diff (new/removed/changed devices).
 3. Flag if any previously-known device (by MAC) is now missing.
 
-Use the `devices-config` skill for the file schema. Never overwrite a device's stored `display` (resolution_index/overscan) field — scan only writes `ip`/`mac`/`name`/`model`/`serial`/`android_version` (via MAC/serial/IP reconciliation) and never touches `display`; that's written by `capture` instead.
+Use the `devices-config` skill for the file schema. Scan is the fleet's metadata refresh: it writes `ip`/`mac`/`name`/`model`/`serial`/`android_version` **and `display`** (resolution_index/overscan, read from each device's live `guisettings.xml`), reconciling by MAC, then serial, then IP. It never touches `settings`, which is hand-maintained. A field is only overwritten when the probe actually returned a value, so a sleeping device keeps what was already stored.

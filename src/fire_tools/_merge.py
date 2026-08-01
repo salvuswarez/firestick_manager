@@ -34,6 +34,10 @@ def reconcile(existing: list[Device], discovered: list[Device]) -> ReconcileResu
     then IP (in that order of preference), and updates in place; anything
     unmatched is added as a new device.
 
+    Every field is only overwritten when the scan actually produced a value,
+    so an unreachable or partially-probed device keeps what was already
+    known. `Device.settings` is never touched at all — it's hand-maintained.
+
     PARAMETERS:
         existing (list[Device]): Previously known devices.
         discovered (list[Device]): Devices found by this scan.
@@ -61,6 +65,10 @@ def reconcile(existing: list[Device], discovered: list[Device]) -> ReconcileResu
             match.model = disc.model or match.model
             match.serial = disc.serial or match.serial
             match.android_version = disc.android_version or match.android_version
+            # Empty means "couldn't read it this sweep" (device asleep, Kodi
+            # not installed, or simply never calibrated — Kodi omits settings
+            # left at default). Never let that blank a stored calibration.
+            match.display = disc.display or match.display
             updated += 1
         else:
             merged.append(disc)

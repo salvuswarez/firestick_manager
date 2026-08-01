@@ -34,7 +34,7 @@ You are the fleet-operations specialist for firestick_manager. Follow all standa
 - Every ADB op targets `-s {ip}:5555` — Fire TV's fixed ADB-over-network port. `Firestick.connect()` calls `adb connect ip:5555` before each session; it's cheap and idempotent, always call it first.
 - `debloat()` uses `pm disable-user --user 0`, not `uninstall` — reversible. There's a separate `re_enable_bloatware`-style restore path in the legacy root script (see project gotcha memory), not yet ported into `core.py`.
 - Scanning is deliberately parallel (`ThreadPoolExecutor`, 50 workers for ping, 10 for ADB identify) — a full `/24` sweep takes ~2s for ping, longer for ADB identify. Don't serialize this.
-- `devices.yml` is the fleet's source of truth for both the IP list and per-device `display` (resolution_index/overscan) calibration consumed by the Kodi deploy pipeline — captured live by `capture`, reapplied by `deploy`; treat it as data, validate before hand-editing.
+- `devices.yml` is the fleet's source of truth for the IP list, per-device `display` (resolution_index/overscan) calibration, and hand-maintained `settings` overrides, all consumed by the Kodi deploy pipeline. **`scan` writes `display`** (read live from each device's `guisettings.xml`; moved out of `capture` in 0.1.15 so the whole fleet gets recorded, not just the captured device) and `deploy` reapplies it. `scan` never touches `settings`, and never blanks a stored value when a device is unreachable. Treat the file as data, validate before hand-editing.
 
 ## When to Help
 

@@ -63,23 +63,24 @@ def collect_kodi_metadata(adb: AdbClient) -> dict[str, str]:
     return meta
 
 
-def collect_kodi_display_settings(adb: AdbClient) -> dict[str, Any]:
-    """Read Kodi's active resolution index and overscan calibration from guisettings.xml.
+def parse_display_settings(xml: str) -> dict[str, Any]:
+    """Extract resolution index and overscan calibration from `guisettings.xml`.
+
+    Pure parsing, split from the ADB read so both callers can share it: the
+    scan job reaches devices through Scanner's simple `(ip, cmd) -> str`
+    runner, while other callers hold a full `AdbClient`.
 
     Kodi only writes a setting to `guisettings.xml` when it differs from the
     default, so a device that's never been manually calibrated legitimately
-    has neither value present — that's reported as an empty dict, not an
-    error, matching the `display_settings` shape `jobs.display` reads/writes.
+    has neither value present — that's an empty dict, not an error, matching
+    the `display_settings` shape `jobs.display` reads/writes.
 
-    PARAMETERS:
-        adb (AdbClient): An already-connected ADB client for the device.
+    **PARAMETERS:**
+        `xml` (str): Contents of `guisettings.xml`, or `""` if unreadable.  <br>
 
-    RETURNS:
-        dict[str, Any]: `{"resolution_index": int, "overscan": {"left": int,
-        "top": int, "right": int, "bottom": int}}`, with `resolution_index`
-        and/or `overscan` omitted if not found in the file.
+    **RETURNS:**
+        `dict[str, Any]`: ``{"resolution_index": int, "overscan": {...}}``, with either key omitted when not present in the file.  <br>
     """
-    xml = adb.shell_ok(f"cat {REMOTE_GUISETTINGS_PATH}")
     if not xml:
         return {}
 
@@ -99,3 +100,15 @@ def collect_kodi_display_settings(adb: AdbClient) -> dict[str, Any]:
         settings["overscan"] = overscan
 
     return settings
+
+
+def collect_kodi_display_settings(adb: AdbClient) -> dict[str, Any]:
+    """Read a connected device's Kodi display calibration.
+
+    **PARAMETERS:**
+        `adb` (AdbClient): An already-connected ADB client for the device.  <br>
+
+    **RETURNS:**
+        `dict[str, Any]`: Same shape as `parse_display_settings`.  <br>
+    """
+    return parse_display_settings(adb.shell_ok(f"cat {REMOTE_GUISETTINGS_PATH}"))

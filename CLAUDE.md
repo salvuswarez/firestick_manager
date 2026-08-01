@@ -25,6 +25,7 @@ Both `.env` and `resources/devices.yml` are gitignored — real credentials and 
 
 These are three separate stages, and the split is deliberate:
 
+0. **`scan`** — the fleet metadata refresh. Writes every `Device` field except the hand-maintained `settings`, including `display` (resolution/overscan read from each device's live `guisettings.xml`). It only overwrites a field when the probe actually returned a value, so an unreachable device keeps what was already stored.
 1. **`capture <ip>`** — pull a device's live `.kodi` into a raw archive on SMB (`gold/` for gold captures). On-device `tar cf` + separate `gzip` (never `tar czf`, see the toybox gotcha memory).
 2. **`build`** — download the raw capture, apply *every* profile transform once (addon pruning, settings overrides, hub layout, view-type fixes), repack **flat** (`addons/`, `userdata/`, `media/` at the tar root — no `.kodi/` wrapper) and publish under `builds/` on SMB.
 3. **`deploy <ip>`** — download a build, push it as **one archive**, extract on-device, then apply only what is per-device: the base APK version check, `Device.display` calibration, and `Device.settings` overrides from `devices.yml`.

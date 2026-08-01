@@ -17,8 +17,8 @@ Backups and the base Kodi APK live only on the SMB share (`SmbConfig.smb_backup_
 | `maintain [ip]` | `--batch` | Debloat + speed up UI + block telemetry + clean cache on one device (`ip`) or every device in `devices.yml` (`--batch`) |
 | `build` | `--source <device_dir>/<file>.tar.gz` | Downloads a raw capture (explicit `--source`, or the latest under `gold/`), applies every profile transform once — addon whitelist pruning, settings overrides, hub layout, view-type fixes — repacks **flat** (`addons`/`userdata`/`media` at the tar root) and publishes to `builds/` on SMB. Run this after a capture, before deploying |
 | `deploy [ip]` | `--batch`, `--backup builds/<file>.tar.gz` | Downloads a **build** from SMB (explicit `--backup`, or the latest build; a non-`builds/` reference is rejected), installs the base APK if the device isn't already on that version, pushes the archive as one file, extracts it on-device (`gzip -d` then `tar xf`, replacing `addons`/`userdata`/`media`), verifies the result, then applies per-device config from `devices.yml`: `display` (resolution_index/overscan) and `settings` overrides. Does no profile shaping — that's `build` |
-| `capture <ip>` | `--name <name>` | Tars the device's live `.kodi` dir, verifies the gzip, uploads it to SMB (no local copy kept), and records the device's current Kodi resolution/overscan calibration into `devices.yml` (`display` field) for `deploy` to reapply later |
-| `apply-display <ip>` | `--resolution-index <int>`, `--overscan LEFT TOP RIGHT BOTTOM` | One-off: patches resolution index and/or overscan directly into an already-deployed device's `guisettings.xml` via `sed`. Does **not** touch `devices.yml` — re-run `capture` afterward to persist the new value for future deploys |
+| `capture <ip>` | `--name <name>` | Tars the device's live `.kodi` dir, verifies the gzip, uploads it to SMB (no local copy kept). Does not record display calibration — `scan` owns that as of 0.1.15 |
+| `apply-display <ip>` | `--resolution-index <int>`, `--overscan LEFT TOP RIGHT BOTTOM` | One-off: patches resolution index and/or overscan directly into an already-deployed device's `guisettings.xml` via `sed`. Does **not** touch `devices.yml` — run `scan` afterward to persist the new value for future deploys |
 | `list-backups` | — | Lists backups found on the SMB share (filename, date, size) |
 | `scan` | `--subnet <x.x.x>` (default `192.168.50`) | Parallel ping + ARP + ADB-identify sweep of a `/24`; reconciles results into `resources/devices.yml` by MAC, then serial, then IP |
 
@@ -27,7 +27,7 @@ Backups and the base Kodi APK live only on the SMB share (`SmbConfig.smb_backup_
 ```bash
 uv run fire-tools scan --subnet 192.168.50                          # refresh device inventory
 uv run fire-tools maintain --batch                                  # debloat the whole fleet
-uv run fire-tools capture 192.168.1.50                               # snapshot one device + record its display calibration
+uv run fire-tools capture 192.168.1.50                               # snapshot one device's Kodi profile to SMB
 uv run fire-tools deploy --batch                                    # full fleet redeploy (base APK auto-installed if stale, per-device display reapplied)
 uv run fire-tools apply-display 192.168.1.50 --resolution-index 16 --overscan 0 0 1920 1080
 uv run fire-tools list-backups                                      # what's on SMB right now

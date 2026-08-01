@@ -17,7 +17,7 @@ devices:
     model: Unknown          # written by scan (ADB getprop ro.product.model)
     serial: ""              # written by scan (ADB getprop ro.serialno)
     android_version: ""     # written by scan
-    display:                # written by capture (reads live guisettings.xml)
+    display:                # written by scan (reads live guisettings.xml)
       resolution_index: 16
       overscan: {left: 0, top: 0, right: 1920, bottom: 1080}
     settings:               # hand-maintained only; applied by deploy
@@ -27,7 +27,13 @@ devices:
         m3uPath: "http://192.168.1.50/playlist.m3u"
 ```
 
-`scan` writes `ip`/`mac`/`name`/`model`/`serial`/`android_version` (via `fire_tools.jobs.scan.run_scan` -> `fire_tools._merge.reconcile`, matching existing devices by MAC, then serial, then IP). `display` is populated by `capture` instead: `fire_tools._kodi.collect_kodi_display_settings` reads the device's live `guisettings.xml` (`videoscreen.resolution` setting + first `<resolutions>` block's overscan) and `fire_tools.device_store.DeviceStore.update_display` writes it into the matching device — replacing whatever was stored before, since it reflects a live read. `resolution_index`/`overscan` are also hand-editable to pre-seed a device before its first capture, or to force a specific value.
+`scan` writes **everything except `settings`** — `ip`/`mac`/`name`/`model`/`serial`/`android_version` **and `display`** (via `fire_tools.jobs.scan.run_scan` -> `fire_tools.scanner.Scanner._probe_adb` -> `fire_tools._merge.reconcile`, matching existing devices by MAC, then serial, then IP). `Scanner._probe_adb` reads the device's live `guisettings.xml` and parses it with `fire_tools._kodi.parse_display_settings` (`videoscreen.resolution` setting + first `<resolutions>` block's overscan).
+
+Display moved from `capture` to `scan` in 0.1.15: deploy reapplies calibration to *every* device, but capture only ever visits one (usually just the gold device), so the rest of the fleet's calibration was never recorded. `DeviceStore.update_display` was removed along with it — `reconcile` is now the only writer.
+
+`reconcile` only overwrites a field when the scan actually produced a value, so a sleeping or partially-probed device keeps what was already known — an unreadable `guisettings.xml` never blanks a stored calibration. `resolution_index`/`overscan` stay hand-editable to pre-seed or force a value.
+
+**Ordering caveat:** the stored value is whatever the device currently has. A deploy overwrites `guisettings.xml` with the build's copy and then reapplies the stored calibration — so scanning after a *completed* deploy reads back the right value. Scanning after a deploy that died between extraction and the display step would record the build's value instead. Re-run `apply-display`, then `scan`, to correct it.
 
 ## How the CLI uses it
 

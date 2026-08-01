@@ -52,30 +52,6 @@ class DeviceStore:
         with self._lock:
             return next((d for d in self._load() if d.ip == ip), None)
 
-    def update_display(self, ip: str, display: dict[str, Any]) -> bool:
-        """Persist captured Kodi display calibration for a known device.
-
-        PARAMETERS:
-            ip (str): Device IP to update; no-op if not already in the store
-                (a device must be scanned/known before its calibration can
-                be recorded).
-            display (dict[str, Any]): Same shape as `jobs.display`'s
-                `display_settings` — replaces any previously stored value
-                for this device outright, since it reflects the device's
-                current live state.
-
-        RETURNS:
-            bool: Whether a device at `ip` was found and updated.
-        """
-        with self._lock:
-            devices = self._load()
-            dev = next((d for d in devices if d.ip == ip), None)
-            if dev is None:
-                return False
-            dev.display = display
-            self._save(devices)
-            return True
-
     def reconcile(self, discovered: builtins.list[Device]) -> ReconcileResult:
         """Merge freshly scanned devices into the store, under the write lock.
 

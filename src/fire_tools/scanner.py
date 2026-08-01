@@ -10,6 +10,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+from ._kodi import parse_display_settings
+from .const import REMOTE_GUISETTINGS_PATH
+
 LOGGER = logging.getLogger(__name__)
 
 _PING_WORKERS = 50
@@ -178,8 +181,8 @@ class Scanner:
         - mac: MAC address discovered from ARP (may be empty).
 
         **RETURNS:**
-        A device dict with ip, mac, name, model, serial, and android_version,
-        or None if the device does not expose a product model.
+        A device dict with ip, mac, name, model, serial, android_version, and
+        display, or None if the device does not expose a product model.
         """
         model = self._run_adb_retry(ip, "getprop ro.product.model")
         if not model:
@@ -189,6 +192,12 @@ class Scanner:
             device_name = model
         serial = self._run_adb_retry(ip, "getprop ro.serialno")
         android_version = self._run_adb_retry(ip, "getprop ro.build.version.release")
+        # Read here rather than in capture: deploy reapplies this on *every*
+        # device, but capture only ever visits one (usually just the gold
+        # device), so calibration for the rest of the fleet was never recorded.
+        # Only attempted once the model check confirms a real device, so
+        # non-Kodi hosts on the subnet don't pay for it.
+        display = parse_display_settings(self._run_adb(ip, f"cat {REMOTE_GUISETTINGS_PATH}"))
         return {
             "ip": ip,
             "mac": mac,
@@ -196,6 +205,7 @@ class Scanner:
             "model": model,
             "serial": serial,
             "android_version": android_version,
+            "display": display,
         }
 
     def scan(self) -> list[dict[str, Any]]:

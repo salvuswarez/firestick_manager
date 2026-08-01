@@ -2,11 +2,13 @@
 # `uv run fire-tools scan` to auto-populate it. devices.yml is gitignored —
 # it accumulates real MAC addresses/IPs from your network, never commit it.
 #
-# `ip`/`mac`/`name` are written by `scan`. `display` is written by `capture`
-# (reads the device's live guisettings.xml) and reapplied by `deploy` after
-# every deploy — hand-add it only to pre-seed calibration before a first
-# capture, or run `uv run fire-tools apply-display <ip> --resolution-index
-# ... --overscan ...` to set it live and let the next capture record it.
+# `ip`/`mac`/`name`/`model`/`serial`/`android_version` and `display` are all
+# written by `scan` — it reads each device's live guisettings.xml for the
+# resolution/overscan calibration, which `deploy` then reapplies after
+# extracting a build. Hand-add `display` only to pre-seed or force a value,
+# or run `uv run fire-tools apply-display <ip> --resolution-index ...
+# --overscan ...` to set it live and let the next scan record it.
+# A scan never blanks a stored value when a device is unreachable.
 #
 # `settings` is hand-maintained. A build is one artifact shared by the whole
 # fleet, so anything that has to differ per stick goes here and is patched
