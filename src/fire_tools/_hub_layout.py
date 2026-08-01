@@ -403,11 +403,16 @@ def apply_hub_layout(userdata_dir: Path) -> list[str]:
 
         # Keep the TMDbHelper node in step with the widgets so navigating
         # into a hub shows the same content its home rows advertise.
+        # widget=False here (unlike the home-screen widgets file): this list
+        # is the page you land on *after* navigating into the hub, so rows
+        # should be static, load-on-select entries, not auto-loading
+        # scrollers — otherwise entering the hub fires every row's live
+        # TMDb query at once. See module docstring re: slot 1104 OOM history.
         node = {
             "name": spec["node_name"],
             "icon": f"{_ICON_TMDB}/discover.png",
-            "list": [{"name": r["label"], "icon": r["icon"], "path": r["path"], "widget": "True"} for r in spec["widgets"]]
-            + [{"name": lbl, "icon": ic, "path": rows[0]["path"], "widget": "True"} for lbl, ic, rows in submenu_spec if rows],
+            "list": [{"name": r["label"], "icon": r["icon"], "path": r["path"], "widget": "False"} for r in spec["widgets"]]
+            + [{"name": lbl, "icon": ic, "path": rows[0]["path"], "widget": "False"} for lbl, ic, rows in submenu_spec if rows],
         }
         _write_json(nodes / spec["node"], node)
 

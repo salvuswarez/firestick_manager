@@ -13,6 +13,14 @@ hub's widgets at once at startup (not just the visible one), TMDbHelper
 allowed up to 10 concurrent background threads, and thumbnail caching was
 redirected over network SMB instead of local storage — all compounding into
 a low-memory kill (see gotcha_textures_db_stale_index memory).
+
+Found 2026-08-01: several addons had Trakt-backed features enabled (watched
+indicators, scrobbling, nav list) with no Trakt account ever authenticated
+(`trakt.user.token`/`trakt.clientid`/etc. all empty) — this household doesn't
+use Trakt. Every scrobble/indicator lookup was silently failing on every
+relevant action, the same "retry against something that can't succeed"
+pattern as the unauthenticated Ceviche/Minerva telemetry calls found the same
+day. Confirmed fixed on the disposable device (203) before folding in here.
 """
 
 from __future__ import annotations
@@ -50,6 +58,23 @@ SETTING_OVERRIDES: dict[str, dict[str, str]] = {
         # Was `10`: allowed up to 10 concurrent background discover/image
         # threads at once. Lower cap staggers the load instead of bursting.
         "max_threads": "4",
+        # Was `true` with no Trakt account authenticated: scrobbled every
+        # playback to Trakt's API and failed every time.
+        "trakt_scrobbling": "false",
+    },
+    "addon_data/plugin.video.umbrella/settings.xml": {
+        # Was `Trakt` (addon default is `Local`): sourced watched/progress
+        # indicators from Trakt with no account authenticated, so every
+        # lookup failed. Restores the addon's own shipped default.
+        "indicators": "Local",
+    },
+    "addon_data/plugin.video.thecrew/settings.xml": {
+        # Was `true` with no Trakt account authenticated: scrobbled every
+        # playback to Trakt's API and failed every time.
+        "trakt.scrobble": "false",
+        # Was `true`: showed a Trakt list nav entry that can't load anything
+        # without an authenticated account.
+        "navi.traktlist": "false",
     },
 }
 
