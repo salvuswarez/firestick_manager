@@ -32,9 +32,14 @@ SETTING_OVERRIDES: dict[str, dict[str, str]] = {
         "homeswitcher.1102.name": "Series",
         "HomeSwitcher.1102.Name": "Series",
         "HomeSwitcher.1102.Shortcut.label": "Series",
-        "homeswitcher.1104.name": "Discover",
-        "HomeSwitcher.1104.Name": "Discover",
-        "HomeSwitcher.1104.Shortcut.label": "Discover",
+        "homeswitcher.1104.name": "Browse",
+        "HomeSwitcher.1104.Name": "Browse",
+        "HomeSwitcher.1104.Shortcut.label": "Browse",
+        # script.skinvariables only recompiles HomeSwitcher JSON into the
+        # skin's rendered includes when this hash changes. Without
+        # invalidating it, new hub JSON lands but the compiled includes stay
+        # stale even across a Kodi restart + cache clear.
+        "script-skinvariables-generator-hash": "invalidated-by-deploy",
     },
     "addon_data/plugin.video.themoviedb.helper/settings.xml": {
         # Was `10`: allowed up to 10 concurrent background discover/image

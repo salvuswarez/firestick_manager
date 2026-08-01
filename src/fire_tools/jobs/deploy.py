@@ -13,6 +13,7 @@ from .._hub_layout import apply_hub_layout
 from .._kodi import check_device_online, collect_kodi_metadata
 from .._settings_overrides import apply_setting_overrides, remove_thumbnail_path_substitution
 from .._smb import SmbClient
+from .._view_types import apply_view_type_overrides
 from ..const import REMOTE_KODI_PATH
 from ..device_store import DeviceStore
 from ..models import SmbConfig
@@ -102,6 +103,11 @@ def run_deploy(
         handle.check_cancelled()
         handle.log("Regenerating home-screen hub layout...")
         for change in apply_hub_layout(extracted_path / "userdata"):
+            handle.log(f"  {change}")
+
+        handle.check_cancelled()
+        handle.log("Fixing view-type consistency (TV shows/seasons: library vs plugin)...")
+        for change in apply_view_type_overrides(extracted_path / "addons"):
             handle.log(f"  {change}")
 
         handle.check_cancelled()

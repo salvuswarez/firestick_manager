@@ -16,16 +16,15 @@ this module: previously the captured gold config had e.g. Movies listing
 seven rows as a node but only four as widgets, so browsing into a hub showed
 different content than its home rows.
 
-**Why this also matters for stability:** slot 1104 ("Genres") was the only
-hub with no submenu file at all, so it was a flat wall of ten *live* TMDb
-discover queries with zero local content — every one firing on focus. It was
-also the hub that reproducibly preceded an OOM kill on a 1.7GB stick (see
-the `gotcha_textures_db_stale_index` memory). It is rebuilt here as "Browse":
-a navigation hub whose submenu costs nothing to focus, with content loaded
-only once the user picks a category.
+**Why this also matters for stability:** slot 1104 ("Genres") was a flat
+wall of ten live TMDb queries with no submenu and no local content, and
+reproducibly preceded an OOM kill on a 1.7GB stick (see the
+`gotcha_textures_db_stale_index` memory). It is rebuilt as "Browse": a pure
+index that calls the same row-generator functions Movies/Series use for
+their own submenus, so it can never drift into a second definition of the
+same content.
 
-Slots deliberately NOT touched: 1103 (Crime — curated by hand, kept as-is),
-1107 (Live TV / IPTV), 1108.
+Slots deliberately NOT touched: 1103 (hand-curated), 1107 (Live TV), 1108.
 """
 from __future__ import annotations
 
@@ -66,10 +65,13 @@ def _p(base: str, **params: Any) -> str:
     return f"{base}&{extra}" if extra else base
 
 
-# Genre/network ids are TMDb's own. `%7C` is a URL-encoded pipe meaning OR.
-_TV = {"comedy": 35, "drama": 18, "scifi": 10765, "animation": 16, "crime": 80, "docs": 99, "reality": 10764}
-_MOV = {"action": 28, "adventure": 12, "comedy": 35, "scifi": 878, "horror": 27, "family": 10751, "thriller": 53, "drama": 18}
+# Genre/network/company ids are TMDb's own. `%7C` is a URL-encoded pipe (OR).
+_TV = {"comedy": 35, "drama": 18, "scifi": 10765, "animation": 16, "crime": 80, "docs": 99, "mystery": 9648, "reality": 10764}
+_MOV = {"action": 28, "adventure": 12, "comedy": 35, "scifi": 878, "horror": 27, "family": 10751, "thriller": 53, "drama": 18, "crime": 80, "mystery": 9648, "docs": 99}
 _NET = {"netflix": 213, "hbo": "49%7C3186", "apple": 2552, "disney": 2739, "paramount": 4330, "hulu": 453}
+# Reused as-is from the gold device's captured config.
+_INTL_NET = {"abs_cbn": 156, "gma": 210, "viu": 1510}
+_STUDIO = {"marvel": 420, "pixar": 3, "a24": 41077, "ghibli": 10342}
 
 # Kodi library smartlists — local, instant, no network round-trip. Every hub
 # leads with these so something renders before any TMDb call resolves.
@@ -131,6 +133,60 @@ def _decade_rows() -> list[dict[str, str]]:
     return out
 
 
+def _tv_decade_rows() -> list[dict[str, str]]:
+    out = []
+    for label, lo, hi in [("2020s", "2020-01-01", "2029-12-31"), ("2010s", "2010-01-01", "2019-12-31"),
+                          ("2000s", "2000-01-01", "2009-12-31"), ("Classic TV (pre-2000)", "1900-01-01", "1999-12-31")]:
+        path = _p(_discover("tv", sort_by="popularity.desc"), vote_count__gte=100,
+                  first_air_date__gte=lo, first_air_date__lte=hi)
+        out.append(_row(label, path, f"{_ICON_TMDB}/tv.png"))
+    return out
+
+
+def _crime_docs_mystery_row(tmdb_type: str) -> dict[str, str]:
+    genres = f"{_MOV['crime']}%7C{_MOV['mystery']}%7C{_MOV['docs']}"
+    icon = f"{_ICON_TMDB}/movies.png" if tmdb_type == "movie" else f"{_ICON_TMDB}/tv.png"
+    return _row("Crime, Docs & Mystery", _p(_discover(tmdb_type, with_genres=genres, sort_by="popularity.desc"), vote_count__gte=100), icon)
+
+
+def _movie_collection_rows() -> list[dict[str, str]]:
+    return [
+        _row("Top Rated (90%+)", _p(_discover("movie", sort_by="popularity.desc"), vote_average__gte=8.0, vote_count__gte=2000), f"{_ICON_TMDB}/popular.png"),
+        _row("Crime & Thriller", _p(_discover("movie", with_genres=f"{_MOV['crime']}%7C{_MOV['thriller']}", sort_by="popularity.desc"), vote_count__gte=100), f"{_ICON_TMDB}/movies.png"),
+        _row("New This Month", _p(_discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
+                                  vote_count__gte=10, primary_release_date__lte="T-0", primary_release_date__gte="T-30"), f"{_ICON_TMDB}/intheatres.png"),
+        _row("Hidden Gems", _p(_discover("movie", sort_by="vote_average.desc"), vote_count__gte=50, vote_count__lte=400), f"{_ICON_TMDB}/movies.png"),
+    ]
+
+
+def _studio_rows() -> list[dict[str, str]]:
+    return [
+        _row("Marvel", _discover("movie", with_companies=_STUDIO["marvel"], sort_by="primary_release_date.desc"), f"{_ICON_TMDB}/movies.png"),
+        _row("Pixar", _discover("movie", with_companies=_STUDIO["pixar"], sort_by="primary_release_date.desc"), f"{_ICON_TMDB}/movies.png"),
+        _row("A24", _discover("movie", with_companies=_STUDIO["a24"], sort_by="primary_release_date.desc"), f"{_ICON_TMDB}/movies.png"),
+        _row("Studio Ghibli", _discover("movie", with_companies=_STUDIO["ghibli"], sort_by="primary_release_date.desc"), f"{_ICON_TMDB}/movies.png"),
+    ]
+
+
+def _international_rows() -> list[dict[str, str]]:
+    # K-Dramas/Anime use origin-country + genre — TMDb has no network id for
+    # either as a category.
+    return [
+        _row("ABS-CBN", _discover("tv", with_networks=_INTL_NET["abs_cbn"], sort_by="first_air_date.desc"), f"{_ICON_TMDB}/discover.png"),
+        _row("GMA", _discover("tv", with_networks=_INTL_NET["gma"], sort_by="popularity.desc"), f"{_ICON_TMDB}/discover.png"),
+        _row("Viu", _discover("tv", with_networks=_INTL_NET["viu"], sort_by="popularity.desc"), f"{_ICON_TMDB}/discover.png"),
+        _row("K-Dramas", _p(_discover("tv", sort_by="popularity.desc"), with_origin_country="KR", vote_count__gte=50), f"{_ICON_TMDB}/tv.png"),
+        _row("Anime", _p(_discover("tv", with_genres=_TV["animation"], sort_by="popularity.desc"), with_origin_country="JP", vote_count__gte=50), f"{_ICON_TMDB}/tv.png"),
+    ]
+
+
+def _tv_critically_acclaimed_rows() -> list[dict[str, str]]:
+    return [
+        _row("Top Rated (90%+)", _p(_discover("tv", sort_by="popularity.desc"), vote_average__gte=8.0, vote_count__gte=500), f"{_ICON_TMDB}/popular.png"),
+        _row("Hidden Gems", _p(_discover("tv", sort_by="vote_average.desc"), vote_count__gte=20, vote_count__lte=200), f"{_ICON_TMDB}/tv.png"),
+    ]
+
+
 # --- The single source of truth for every managed hub ------------------------
 #
 # `widgets` render as rows on the home screen for that tab; `submenu` renders
@@ -142,9 +198,14 @@ HUBS: dict[str, dict[str, Any]] = {
         "node_name": "HOME",
         "widgets": [
             _row("Continue Watching", _LIB_TV_PROGRESS, f"{_ICON_WHITE}/recent.png"),
-            _row("Recently Added Episodes", _LIB_TV_RECENT, f"{_ICON_WHITE}/calendar.png"),
-            _row("Recently Added Movies", _LIB_MOV_RECENT, f"{_ICON_WHITE}/recent.png"),
-            _row("Trending Today", _discover("tv", sort_by="popularity.desc"), f"{_ICON_TMDB}/trending.png"),
+            _row("Recently Added", _LIB_MOV_RECENT, f"{_ICON_WHITE}/calendar.png"),
+            _row("New Releases This Week", _p(_discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
+                                              vote_count__gte=10, primary_release_date__lte="T-0", primary_release_date__gte="T-7"), f"{_ICON_TMDB}/intheatres.png"),
+            _row("Trending Now", _discover("tv", sort_by="popularity.desc"), f"{_ICON_TMDB}/trending.png"),
+            # Same genre math as Series > Crime, Docs & Mystery, surfaced on
+            # home. The hand-curated 1103 hub is never touched.
+            _row("Picked for Maddy",_p(_discover("tv", with_genres=f"{_TV['crime']}%7C{_TV['mystery']}", sort_by="popularity.desc"),
+                                        vote_count__gte=50), f"{_ICON_TMDB}/discover.png"),
         ],
         "submenu": [],
     },
@@ -156,11 +217,15 @@ HUBS: dict[str, dict[str, Any]] = {
             _row("Recently Added", _LIB_MOV_RECENT, f"{_ICON_WHITE}/calendar.png"),
             _row("New Releases", _p(_discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
                                     vote_count__gte=25, primary_release_date__lte="T-0"), f"{_ICON_TMDB}/intheatres.png"),
-            _row("Top Rated", _p(_discover("movie", sort_by="vote_average.desc"), vote_count__gte=500), f"{_ICON_TMDB}/popular.png"),
+            _row("Comedy", _p(_discover("movie", with_genres=_MOV["comedy"], sort_by="popularity.desc"), vote_count__gte=300), f"{_ICON_TMDB}/movies.png"),
+            _row("Sci-Fi", _p(_discover("movie", with_genres=_MOV["scifi"], sort_by="popularity.desc"), vote_count__gte=200), f"{_ICON_TMDB}/movies.png"),
+            _crime_docs_mystery_row("movie"),
         ],
         "submenu": [
             ("Genres", f"{_ICON_SKIN}/genre.png", _movie_genre_rows()),
-            ("Decades", f"{_ICON_SKIN}/calendar.png", _decade_rows()),
+            ("Collections", f"{_ICON_SKIN}/genre.png", _movie_collection_rows()),
+            ("By Decade", f"{_ICON_SKIN}/calendar.png", _decade_rows()),
+            ("By Studio", f"{_ICON_SKIN}/genre.png", _studio_rows()),
         ],
     },
     "1102": {
@@ -171,46 +236,35 @@ HUBS: dict[str, dict[str, Any]] = {
             _row("Recently Added Episodes", _LIB_TV_RECENT, f"{_ICON_WHITE}/calendar.png"),
             _row("New Premieres", _p(_discover("tv", sort_by="first_air_date.desc", with_original_language="en"),
                                      vote_count__gte=5, first_air_date__lte="T-0", first_air_date__gte="T-90"), f"{_ICON_TMDB}/trending.png"),
-            _row("Top Rated Series", _p(_discover("tv", sort_by="vote_average.desc"), vote_count__gte=200), f"{_ICON_TMDB}/popular.png"),
+            _row("Drama", _p(_discover("tv", with_genres=_TV["drama"], sort_by="popularity.desc"), vote_count__gte=100), f"{_ICON_TMDB}/tv.png"),
+            _crime_docs_mystery_row("tv"),
+            _row("Sci-Fi", _p(_discover("tv", with_genres=_TV["scifi"], sort_by="popularity.desc"), vote_count__gte=100), f"{_ICON_TMDB}/tv.png"),
         ],
         "submenu": [
-            ("Streaming", f"{_ICON_SKIN}/rocket.png", _streaming_rows("tv")),
             ("Genres", f"{_ICON_SKIN}/genre.png", _tv_genre_rows()),
+            ("By Network", f"{_ICON_SKIN}/rocket.png", _streaming_rows("tv")),
+            ("International", f"{_ICON_SKIN}/genre.png", _international_rows()),
+            ("By Decade", f"{_ICON_SKIN}/calendar.png", _tv_decade_rows()),
+            ("Critically Acclaimed", f"{_ICON_SKIN}/genre.png", _tv_critically_acclaimed_rows()),
         ],
     },
-    # Was "Genres": ten live TMDb rows, no submenu, no local content — and
-    # every one of those rows duplicated something already reachable under
-    # Movies or Series. Rebuilt as "Discover" with a job no other tab has:
-    # cross-cutting curated discovery (what's hot, what's acclaimed, what's
-    # coming). Genre browsing deliberately lives ONLY under its parent tab
-    # (movie genres under Movies, TV genres under Series) so there is exactly
-    # one place to find any given thing.
+    # A pure index over Movies'/Series' own submenus — every group below
+    # calls the same row-generators those tabs use, so it can't drift.
     "1104": {
         "node": "genres_hub.json",
-        "node_name": "DISCOVER",
-        # Only two rows, and neither duplicates another tab: this is the hub
-        # that was preceding the OOM kill, so it stays the lightest one.
+        "node_name": "BROWSE",
+        # Deliberately light: this hub's job is the submenu, not widgets.
+        # OOM history here means no wide fan-out of live rows.
         "widgets": [
             _row("Popular Movies", _p(_discover("movie", sort_by="popularity.desc"), vote_count__gte=300), f"{_ICON_TMDB}/popular.png"),
             _row("New This Week", _p(_discover("tv", sort_by="first_air_date.desc"), vote_count__gte=5,
                                      first_air_date__lte="T-0", first_air_date__gte="T-7"), f"{_ICON_TMDB}/trending.png"),
         ],
         "submenu": [
-            # Deliberately NO "Networks" sub-tab here — that would be the same
-            # six services already under Series > Streaming. Every entry in
-            # this tab has to be something no other tab offers.
-            ("Coming Soon", f"{_ICON_SKIN}/calendar.png", [
-                _row("Upcoming Movies", _p(_discover("movie", sort_by="primary_release_date.asc"),
-                                           primary_release_date__gte="T-0"), f"{_ICON_TMDB}/intheatres.png"),
-                _row("Upcoming Series", _p(_discover("tv", sort_by="first_air_date.asc"),
-                                           first_air_date__gte="T-0"), f"{_ICON_TMDB}/tv.png"),
-            ]),
-            ("Hidden Gems", f"{_ICON_SKIN}/genre.png", [
-                _row("Acclaimed Movies", _p(_discover("movie", sort_by="vote_average.desc"),
-                                            vote_count__gte=50, vote_count__lte=400), f"{_ICON_TMDB}/movies.png"),
-                _row("Acclaimed Series", _p(_discover("tv", sort_by="vote_average.desc"),
-                                            vote_count__gte=20, vote_count__lte=200), f"{_ICON_TMDB}/tv.png"),
-            ]),
+            ("Movie Genres", f"{_ICON_SKIN}/genre.png", _movie_genre_rows()),
+            ("TV Genres", f"{_ICON_SKIN}/genre.png", _tv_genre_rows()),
+            ("By Network", f"{_ICON_SKIN}/rocket.png", _streaming_rows("tv")),
+            ("International", f"{_ICON_SKIN}/genre.png", _international_rows()),
         ],
     },
 }
