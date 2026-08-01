@@ -36,6 +36,10 @@ SETTING_OVERRIDES: dict[str, dict[str, str]] = {
         "homeswitcher.1104.name": "Browse",
         "HomeSwitcher.1104.Name": "Browse",
         "HomeSwitcher.1104.Shortcut.label": "Browse",
+        # Hides the Addons tab (slot 1108) from the HomeSwitcher bar, leaving
+        # Live TV (1107) as the last tab. Includes_Home.xml gates the tab's
+        # visibility on `!String.IsEmpty(...)`, so an empty string is "off".
+        "homeswitcher.1108.toggle": "",
         # script.skinvariables only recompiles HomeSwitcher JSON into the
         # skin's rendered includes when this hash changes. Without
         # invalidating it, new hub JSON lands but the compiled includes stay

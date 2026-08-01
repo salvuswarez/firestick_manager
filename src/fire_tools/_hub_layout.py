@@ -24,7 +24,9 @@ index that calls the same row-generator functions Movies/Series use for
 their own submenus, so it can never drift into a second definition of the
 same content.
 
-Slots deliberately NOT touched: 1103 (hand-curated), 1107 (Live TV), 1108.
+Slots deliberately NOT touched by this module: 1103 (hand-curated), 1107
+(Live TV). 1108 (Addons) is disabled outright in `_settings_overrides.py`,
+so Live TV is the last visible tab.
 """
 
 from __future__ import annotations
