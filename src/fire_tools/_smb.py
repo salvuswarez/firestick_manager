@@ -4,10 +4,11 @@ Single place that builds UNC paths and talks to the share — jobs and the
 operation sink depend on this instead of calling `smbclient` directly with
 hand-built `\\\\host\\share\\...` strings scattered across the codebase.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Callable, Iterator, TypeVar
+from typing import Any, Callable, Iterator, TypeVar
 
 import smbclient
 from smbprotocol.exceptions import SMBConnectionClosed
@@ -142,7 +143,7 @@ class SmbClient:
 
         self._call_with_retry(_download)
 
-    def scandir(self, remote: str) -> list:
+    def scandir(self, remote: str) -> list[Any]:
         """List directory entries under `remote`.
 
         Deliberately materializes the listing *inside* the retry wrapper.

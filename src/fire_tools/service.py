@@ -5,6 +5,7 @@ minting, and thread spawning. `ws_api.py` becomes a thin protocol adapter;
 this module is where "what a capture/deploy/maintain/scan actually is"
 lives, independent of the websocket transport.
 """
+
 from __future__ import annotations
 
 import functools
@@ -22,6 +23,7 @@ from ._artifacts import GOLD_DEVICE_DIR, BackupRef, validate_backup_name
 from ._kodi import check_device_online, collect_kodi_metadata
 from ._smb import SmbClient
 from .device_store import DeviceStore
+from .jobs import build as _build_job
 from .jobs import capture as _capture_job
 from .jobs import deploy as _deploy_job
 from .jobs import display as _display_job
@@ -76,8 +78,12 @@ class FleetService:
         """RETURNS: list[dict]: Known devices, in the wire shape the frontend expects."""
         return [
             {
-                "ip": d.ip, "name": d.name, "model": d.model,
-                "serial": d.serial, "mac": d.mac, "display": d.display,
+                "ip": d.ip,
+                "name": d.name,
+                "model": d.model,
+                "serial": d.serial,
+                "mac": d.mac,
+                "display": d.display,
             }
             for d in self._devices.list()
         ]
@@ -136,14 +142,42 @@ class FleetService:
         op_id = f"capture_{ip}_{int(time.time())}"
         self._operations.start(op_id, op_type, ip)
         job = functools.partial(
-            _capture_job.run_capture, ip=ip, backup_name=backup_name,
-            devices=self._devices, adb_keys=self._adb_keys, smb=self._smb, config=self._config,
+            _capture_job.run_capture,
+            ip=ip,
+            backup_name=backup_name,
+            devices=self._devices,
+            adb_keys=self._adb_keys,
+            smb=self._smb,
+            config=self._config,
         )
+        self._dispatch(op_id, job)
+        return op_id
+
+    def start_build(self, source: str | None = None) -> str:
+        """Start a build job: shape a raw capture into a deployable profile.
+
+        **PARAMETERS:**
+            `source` (str | None, optional): ``device_dir/filename`` of the capture to build from. Defaults to ``None``, meaning the latest gold capture.  <br>
+
+        **RETURNS:**
+            `str`: The new operation id.  <br>
+
+        **RAISES:**
+            `ValueError`: If `source` is not a valid backup reference.  <br>
+        """
+        if source:
+            BackupRef.parse(source)
+        op_id = f"build_{int(time.time())}"
+        self._operations.start(op_id, OperationType.BUILD, "")
+        job = functools.partial(_build_job.run_build, source=source, smb=self._smb, config=self._config)
         self._dispatch(op_id, job)
         return op_id
 
     def start_deploy(self, ip: str, backup_name: str | None) -> str:
         """Start a deploy job for `ip`.
+
+        `backup_name` must reference a build (see `start_build`), not a raw
+        capture — deploy only ships built profiles.
 
         RETURNS:
             str: The new operation id.
@@ -157,8 +191,13 @@ class FleetService:
         op_id = f"deploy_{ip}_{int(time.time())}"
         self._operations.start(op_id, OperationType.DEPLOY, ip)
         job = functools.partial(
-            _deploy_job.run_deploy, ip=ip, backup_name=backup_name,
-            devices=self._devices, adb_keys=self._adb_keys, smb=self._smb, config=self._config,
+            _deploy_job.run_deploy,
+            ip=ip,
+            backup_name=backup_name,
+            devices=self._devices,
+            adb_keys=self._adb_keys,
+            smb=self._smb,
+            config=self._config,
         )
         self._dispatch(op_id, job)
         return op_id
@@ -193,7 +232,10 @@ class FleetService:
         op_id = f"display_{ip}_{int(time.time())}"
         self._operations.start(op_id, OperationType.DISPLAY, ip)
         job = functools.partial(
-            _display_job.run_apply_display, ip=ip, display_settings=display_settings, adb_keys=self._adb_keys,
+            _display_job.run_apply_display,
+            ip=ip,
+            display_settings=display_settings,
+            adb_keys=self._adb_keys,
         )
         self._dispatch(op_id, job)
         return op_id
@@ -267,6 +309,7 @@ class FleetService:
         dispatch = {
             OperationType.CAPTURE: lambda: self.start_capture(op.device_ip, None),
             OperationType.CAPTURE_GOLD: lambda: self.start_capture(op.device_ip, None),
+            OperationType.BUILD: lambda: self.start_build(None),
             OperationType.DEPLOY: lambda: self.start_deploy(op.device_ip, None),
             OperationType.MAINTAIN: lambda: self.start_maintain(op.device_ip),
             OperationType.SCAN: lambda: self.start_scan(op.device_ip),
@@ -326,16 +369,18 @@ class FleetService:
                 except Exception as exc:
                     LOGGER.debug("stat failed for %s: %s", ref.wire(), exc)
 
-            result.append({
-                "filename": ref.wire(),
-                "device_name": meta.get("device_name") or device_dir,
-                "device_mac": meta.get("device_mac", ""),
-                "size": str(size or "?"),
-                "date": meta.get("captured_at", ""),
-                "kodi_version": meta.get("kodi_version", ""),
-                "arctic_fuse": meta.get("arctic_fuse", ""),
-                "android_version": meta.get("android_version", ""),
-            })
+            result.append(
+                {
+                    "filename": ref.wire(),
+                    "device_name": meta.get("device_name") or device_dir,
+                    "device_mac": meta.get("device_mac", ""),
+                    "size": str(size or "?"),
+                    "date": meta.get("captured_at", ""),
+                    "kodi_version": meta.get("kodi_version", ""),
+                    "arctic_fuse": meta.get("arctic_fuse", ""),
+                    "android_version": meta.get("android_version", ""),
+                }
+            )
         return result
 
     def get_base_info(self) -> dict[str, Any]:

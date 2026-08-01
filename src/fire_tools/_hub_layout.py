@@ -26,6 +26,7 @@ same content.
 
 Slots deliberately NOT touched: 1103 (hand-curated), 1107 (Live TV), 1108.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -67,7 +68,19 @@ def _p(base: str, **params: Any) -> str:
 
 # Genre/network/company ids are TMDb's own. `%7C` is a URL-encoded pipe (OR).
 _TV = {"comedy": 35, "drama": 18, "scifi": 10765, "animation": 16, "crime": 80, "docs": 99, "mystery": 9648, "reality": 10764}
-_MOV = {"action": 28, "adventure": 12, "comedy": 35, "scifi": 878, "horror": 27, "family": 10751, "thriller": 53, "drama": 18, "crime": 80, "mystery": 9648, "docs": 99}
+_MOV = {
+    "action": 28,
+    "adventure": 12,
+    "comedy": 35,
+    "scifi": 878,
+    "horror": 27,
+    "family": 10751,
+    "thriller": 53,
+    "drama": 18,
+    "crime": 80,
+    "mystery": 9648,
+    "docs": 99,
+}
 _NET = {"netflix": 213, "hbo": "49%7C3186", "apple": 2552, "disney": 2739, "paramount": 4330, "hulu": 453}
 # Reused as-is from the gold device's captured config.
 _INTL_NET = {"abs_cbn": 156, "gma": 210, "viu": 1510}
@@ -98,7 +111,11 @@ def _tv_genre_rows() -> list[dict[str, str]]:
 
 def _movie_genre_rows() -> list[dict[str, str]]:
     return [
-        _row("Action & Adventure", _p(_discover("movie", with_genres=f"{_MOV['action']}%7C{_MOV['adventure']}", sort_by="popularity.desc"), vote_count__gte=500), f"{_ICON_TMDB}/movies.png"),
+        _row(
+            "Action & Adventure",
+            _p(_discover("movie", with_genres=f"{_MOV['action']}%7C{_MOV['adventure']}", sort_by="popularity.desc"), vote_count__gte=500),
+            f"{_ICON_TMDB}/movies.png",
+        ),
         _row("Comedy", _p(_discover("movie", with_genres=_MOV["comedy"], sort_by="popularity.desc"), vote_count__gte=300), f"{_ICON_TMDB}/movies.png"),
         _row("Sci-Fi", _p(_discover("movie", with_genres=_MOV["scifi"], sort_by="popularity.desc"), vote_count__gte=200), f"{_ICON_TMDB}/movies.png"),
         _row("Thriller", _p(_discover("movie", with_genres=_MOV["thriller"], sort_by="popularity.desc"), vote_count__gte=200), f"{_ICON_TMDB}/movies.png"),
@@ -124,21 +141,27 @@ def _streaming_rows(tmdb_type: str = "tv") -> list[dict[str, str]]:
 
 def _decade_rows() -> list[dict[str, str]]:
     out = []
-    for label, lo, hi in [("2020s", "2020-01-01", "2029-12-31"), ("2010s", "2010-01-01", "2019-12-31"),
-                          ("2000s", "2000-01-01", "2009-12-31"), ("90s", "1990-01-01", "1999-12-31"),
-                          ("Classics (pre-1990)", "1900-01-01", "1989-12-31")]:
-        path = _p(_discover("movie", sort_by="popularity.desc"), vote_count__gte=200,
-                  primary_release_date__gte=lo, primary_release_date__lte=hi)
+    for label, lo, hi in [
+        ("2020s", "2020-01-01", "2029-12-31"),
+        ("2010s", "2010-01-01", "2019-12-31"),
+        ("2000s", "2000-01-01", "2009-12-31"),
+        ("90s", "1990-01-01", "1999-12-31"),
+        ("Classics (pre-1990)", "1900-01-01", "1989-12-31"),
+    ]:
+        path = _p(_discover("movie", sort_by="popularity.desc"), vote_count__gte=200, primary_release_date__gte=lo, primary_release_date__lte=hi)
         out.append(_row(label, path, f"{_ICON_TMDB}/movies.png"))
     return out
 
 
 def _tv_decade_rows() -> list[dict[str, str]]:
     out = []
-    for label, lo, hi in [("2020s", "2020-01-01", "2029-12-31"), ("2010s", "2010-01-01", "2019-12-31"),
-                          ("2000s", "2000-01-01", "2009-12-31"), ("Classic TV (pre-2000)", "1900-01-01", "1999-12-31")]:
-        path = _p(_discover("tv", sort_by="popularity.desc"), vote_count__gte=100,
-                  first_air_date__gte=lo, first_air_date__lte=hi)
+    for label, lo, hi in [
+        ("2020s", "2020-01-01", "2029-12-31"),
+        ("2010s", "2010-01-01", "2019-12-31"),
+        ("2000s", "2000-01-01", "2009-12-31"),
+        ("Classic TV (pre-2000)", "1900-01-01", "1999-12-31"),
+    ]:
+        path = _p(_discover("tv", sort_by="popularity.desc"), vote_count__gte=100, first_air_date__gte=lo, first_air_date__lte=hi)
         out.append(_row(label, path, f"{_ICON_TMDB}/tv.png"))
     return out
 
@@ -152,9 +175,21 @@ def _crime_docs_mystery_row(tmdb_type: str) -> dict[str, str]:
 def _movie_collection_rows() -> list[dict[str, str]]:
     return [
         _row("Top Rated (90%+)", _p(_discover("movie", sort_by="popularity.desc"), vote_average__gte=8.0, vote_count__gte=2000), f"{_ICON_TMDB}/popular.png"),
-        _row("Crime & Thriller", _p(_discover("movie", with_genres=f"{_MOV['crime']}%7C{_MOV['thriller']}", sort_by="popularity.desc"), vote_count__gte=100), f"{_ICON_TMDB}/movies.png"),
-        _row("New This Month", _p(_discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
-                                  vote_count__gte=10, primary_release_date__lte="T-0", primary_release_date__gte="T-30"), f"{_ICON_TMDB}/intheatres.png"),
+        _row(
+            "Crime & Thriller",
+            _p(_discover("movie", with_genres=f"{_MOV['crime']}%7C{_MOV['thriller']}", sort_by="popularity.desc"), vote_count__gte=100),
+            f"{_ICON_TMDB}/movies.png",
+        ),
+        _row(
+            "New This Month",
+            _p(
+                _discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
+                vote_count__gte=10,
+                primary_release_date__lte="T-0",
+                primary_release_date__gte="T-30",
+            ),
+            f"{_ICON_TMDB}/intheatres.png",
+        ),
         _row("Hidden Gems", _p(_discover("movie", sort_by="vote_average.desc"), vote_count__gte=50, vote_count__lte=400), f"{_ICON_TMDB}/movies.png"),
     ]
 
@@ -176,7 +211,11 @@ def _international_rows() -> list[dict[str, str]]:
         _row("GMA", _discover("tv", with_networks=_INTL_NET["gma"], sort_by="popularity.desc"), f"{_ICON_TMDB}/discover.png"),
         _row("Viu", _discover("tv", with_networks=_INTL_NET["viu"], sort_by="popularity.desc"), f"{_ICON_TMDB}/discover.png"),
         _row("K-Dramas", _p(_discover("tv", sort_by="popularity.desc"), with_origin_country="KR", vote_count__gte=50), f"{_ICON_TMDB}/tv.png"),
-        _row("Anime", _p(_discover("tv", with_genres=_TV["animation"], sort_by="popularity.desc"), with_origin_country="JP", vote_count__gte=50), f"{_ICON_TMDB}/tv.png"),
+        _row(
+            "Anime",
+            _p(_discover("tv", with_genres=_TV["animation"], sort_by="popularity.desc"), with_origin_country="JP", vote_count__gte=50),
+            f"{_ICON_TMDB}/tv.png",
+        ),
     ]
 
 
@@ -199,13 +238,24 @@ HUBS: dict[str, dict[str, Any]] = {
         "widgets": [
             _row("Continue Watching", _LIB_TV_PROGRESS, f"{_ICON_WHITE}/recent.png"),
             _row("Recently Added", _LIB_MOV_RECENT, f"{_ICON_WHITE}/calendar.png"),
-            _row("New Releases This Week", _p(_discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
-                                              vote_count__gte=10, primary_release_date__lte="T-0", primary_release_date__gte="T-7"), f"{_ICON_TMDB}/intheatres.png"),
+            _row(
+                "New Releases This Week",
+                _p(
+                    _discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
+                    vote_count__gte=10,
+                    primary_release_date__lte="T-0",
+                    primary_release_date__gte="T-7",
+                ),
+                f"{_ICON_TMDB}/intheatres.png",
+            ),
             _row("Trending Now", _discover("tv", sort_by="popularity.desc"), f"{_ICON_TMDB}/trending.png"),
             # Same genre math as Series > Crime, Docs & Mystery, surfaced on
             # home. The hand-curated 1103 hub is never touched.
-            _row("Picked for Maddy",_p(_discover("tv", with_genres=f"{_TV['crime']}%7C{_TV['mystery']}", sort_by="popularity.desc"),
-                                        vote_count__gte=50), f"{_ICON_TMDB}/discover.png"),
+            _row(
+                "Picked for Maddy",
+                _p(_discover("tv", with_genres=f"{_TV['crime']}%7C{_TV['mystery']}", sort_by="popularity.desc"), vote_count__gte=50),
+                f"{_ICON_TMDB}/discover.png",
+            ),
         ],
         "submenu": [],
     },
@@ -215,8 +265,11 @@ HUBS: dict[str, dict[str, Any]] = {
         "widgets": [
             _row("Continue Watching", _LIB_MOV_PROGRESS, f"{_ICON_WHITE}/recent.png"),
             _row("Recently Added", _LIB_MOV_RECENT, f"{_ICON_WHITE}/calendar.png"),
-            _row("New Releases", _p(_discover("movie", sort_by="primary_release_date.desc", with_original_language="en"),
-                                    vote_count__gte=25, primary_release_date__lte="T-0"), f"{_ICON_TMDB}/intheatres.png"),
+            _row(
+                "New Releases",
+                _p(_discover("movie", sort_by="primary_release_date.desc", with_original_language="en"), vote_count__gte=25, primary_release_date__lte="T-0"),
+                f"{_ICON_TMDB}/intheatres.png",
+            ),
             _row("Comedy", _p(_discover("movie", with_genres=_MOV["comedy"], sort_by="popularity.desc"), vote_count__gte=300), f"{_ICON_TMDB}/movies.png"),
             _row("Sci-Fi", _p(_discover("movie", with_genres=_MOV["scifi"], sort_by="popularity.desc"), vote_count__gte=200), f"{_ICON_TMDB}/movies.png"),
             _crime_docs_mystery_row("movie"),
@@ -234,8 +287,16 @@ HUBS: dict[str, dict[str, Any]] = {
         "widgets": [
             _row("Continue Watching", _LIB_TV_PROGRESS, f"{_ICON_WHITE}/recent.png"),
             _row("Recently Added Episodes", _LIB_TV_RECENT, f"{_ICON_WHITE}/calendar.png"),
-            _row("New Premieres", _p(_discover("tv", sort_by="first_air_date.desc", with_original_language="en"),
-                                     vote_count__gte=5, first_air_date__lte="T-0", first_air_date__gte="T-90"), f"{_ICON_TMDB}/trending.png"),
+            _row(
+                "New Premieres",
+                _p(
+                    _discover("tv", sort_by="first_air_date.desc", with_original_language="en"),
+                    vote_count__gte=5,
+                    first_air_date__lte="T-0",
+                    first_air_date__gte="T-90",
+                ),
+                f"{_ICON_TMDB}/trending.png",
+            ),
             _row("Drama", _p(_discover("tv", with_genres=_TV["drama"], sort_by="popularity.desc"), vote_count__gte=100), f"{_ICON_TMDB}/tv.png"),
             _crime_docs_mystery_row("tv"),
             _row("Sci-Fi", _p(_discover("tv", with_genres=_TV["scifi"], sort_by="popularity.desc"), vote_count__gte=100), f"{_ICON_TMDB}/tv.png"),
@@ -257,8 +318,11 @@ HUBS: dict[str, dict[str, Any]] = {
         # OOM history here means no wide fan-out of live rows.
         "widgets": [
             _row("Popular Movies", _p(_discover("movie", sort_by="popularity.desc"), vote_count__gte=300), f"{_ICON_TMDB}/popular.png"),
-            _row("New This Week", _p(_discover("tv", sort_by="first_air_date.desc"), vote_count__gte=5,
-                                     first_air_date__lte="T-0", first_air_date__gte="T-7"), f"{_ICON_TMDB}/trending.png"),
+            _row(
+                "New This Week",
+                _p(_discover("tv", sort_by="first_air_date.desc"), vote_count__gte=5, first_air_date__lte="T-0", first_air_date__gte="T-7"),
+                f"{_ICON_TMDB}/trending.png",
+            ),
         ],
         "submenu": [
             ("Movie Genres", f"{_ICON_SKIN}/genre.png", _movie_genre_rows()),
@@ -274,7 +338,7 @@ def _guid(*parts: str) -> str:
     """RETURNS: str: A stable `guid-xxxxxxxx` derived from `parts`.
 
     Deterministic rather than random so regenerating an unchanged hub
-    produces a byte-identical file — which keeps `AdbClient.sync_tree`'s
+    produces a byte-identical file — which keeps the build step's
     hash comparison from re-pushing it on every deploy.
     """
     return "guid-" + hashlib.md5("|".join(parts).encode()).hexdigest()[:8]
@@ -321,14 +385,16 @@ def apply_hub_layout(userdata_dir: Path) -> list[str]:
         if submenu_spec:
             submenu: list[dict[str, Any]] = []
             for label, icon, rows in submenu_spec:
-                submenu.append({
-                    "label": label,
-                    "path": "Custom_Submenu",
-                    "icon": icon,
-                    "target": "",
-                    "guid": _guid(slot, "sub", label),
-                    "submenu": _with_guids(rows, f"{slot}:{label}"),
-                })
+                submenu.append(
+                    {
+                        "label": label,
+                        "path": "Custom_Submenu",
+                        "icon": icon,
+                        "target": "",
+                        "guid": _guid(slot, "sub", label),
+                        "submenu": _with_guids(rows, f"{slot}:{label}"),
+                    }
+                )
             submenu.append(_blank_slot())
             _write_json(skinvars / f"skinvariables-shortcut-{slot}submenu.json", submenu)
             written.append(f"{slot}: {len(submenu) - 1} sub-tab(s)")
@@ -339,7 +405,7 @@ def apply_hub_layout(userdata_dir: Path) -> list[str]:
             "name": spec["node_name"],
             "icon": f"{_ICON_TMDB}/discover.png",
             "list": [{"name": r["label"], "icon": r["icon"], "path": r["path"], "widget": "True"} for r in spec["widgets"]]
-                    + [{"name": lbl, "icon": ic, "path": rows[0]["path"], "widget": "True"} for lbl, ic, rows in submenu_spec if rows],
+            + [{"name": lbl, "icon": ic, "path": rows[0]["path"], "widget": "True"} for lbl, ic, rows in submenu_spec if rows],
         }
         _write_json(nodes / spec["node"], node)
 

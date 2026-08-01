@@ -4,6 +4,7 @@ Thin wiring over the same job bodies (jobs/) and FleetService used by any
 other consumer of this package (e.g. a Home Assistant integration) — every
 command below is a synchronous, single-operation run of the identical code.
 """
+
 from __future__ import annotations
 
 import functools
@@ -19,6 +20,7 @@ from ._adb import _SHELL_TIMEOUT_S, _TRANSFER_TIMEOUT_S, AdbKeyStore, AdbShellRu
 from ._smb import SmbClient
 from .const import DEFAULT_SMB_BACKUP_DIR, DEFAULT_SMB_HOST, DEFAULT_SMB_SHARE
 from .device_store import DeviceStore
+from .jobs import build as _build_job
 from .jobs import capture as _capture_job
 from .jobs import deploy as _deploy_job
 from .jobs import display as _display_job
@@ -51,13 +53,15 @@ def _load_env() -> dict[str, str]:
 
 def _build_config() -> SmbConfig:
     env = _load_env()
-    return SmbConfig.from_mapping({
-        "smb_host": env.get("SMB_HOST", DEFAULT_SMB_HOST),
-        "smb_share": env.get("SMB_SHARE", DEFAULT_SMB_SHARE),
-        "smb_user": env.get("SMB_USER", ""),
-        "smb_pass": env.get("SMB_PASS", ""),
-        "smb_backup_dir": env.get("SMB_BACKUP_DIR", DEFAULT_SMB_BACKUP_DIR),
-    })
+    return SmbConfig.from_mapping(
+        {
+            "smb_host": env.get("SMB_HOST", DEFAULT_SMB_HOST),
+            "smb_share": env.get("SMB_SHARE", DEFAULT_SMB_SHARE),
+            "smb_user": env.get("SMB_USER", ""),
+            "smb_pass": env.get("SMB_PASS", ""),
+            "smb_backup_dir": env.get("SMB_BACKUP_DIR", DEFAULT_SMB_BACKUP_DIR),
+        }
+    )
 
 
 def _adb_keys() -> AdbKeyStore:
@@ -79,6 +83,25 @@ def _devices() -> DeviceStore:
     return DeviceStore(_DEVICES_YAML)
 
 
+def _resolve_targets(ip: str | None, batch: bool) -> list[str]:
+    """Resolve a command's target device IPs from its `ip`/`--batch` arguments.
+
+    **PARAMETERS:**
+        `ip` (str | None): Positional IP argument, if given.  <br>
+        `batch` (bool): Whether ``--batch`` was passed.  <br>
+
+    **RETURNS:**
+        `list[str]`: One or more target IPs.  <br>
+
+    **RAISES:**
+        `click.UsageError`: If neither an IP nor ``--batch`` was provided.  <br>
+    """
+    targets = [d.ip for d in _devices().list()] if batch else ([ip] if ip else [])
+    if not targets:
+        raise click.UsageError("Provide an IP or use --batch")
+    return targets
+
+
 def _run(job_type: OperationType, device_ip: str, job_fn: Any) -> str | None:
     """Run one job synchronously in-process, echoing its log as it completes.
 
@@ -90,6 +113,8 @@ def _run(job_type: OperationType, device_ip: str, job_fn: Any) -> str | None:
     registry.start(op_id, job_type, device_ip)
     run_job(registry, _STAGING_ROOT, op_id, job_fn)
     op = registry.get(op_id)
+    if op is None:
+        raise click.ClickException("Job record vanished before it could be read")
     for entry in op.logs:
         click.echo(f"[*] {entry['message']}")
     if op.status == OperationStatus.FAILED:
@@ -115,9 +140,7 @@ def download() -> None:
 @click.option("--batch", is_flag=True, help="Run on all known devices")
 def maintain(ip: str | None, batch: bool) -> None:
     """Debloat, speed up, block telemetry, and clean cache on a device."""
-    targets = [d.ip for d in _devices().list()] if batch else [ip]
-    if not targets or not targets[0]:
-        raise click.UsageError("Provide an IP or use --batch")
+    targets = _resolve_targets(ip, batch)
     keys = _adb_keys()
     for target_ip in targets:
         click.echo(f"[*] Maintaining {target_ip}...")
@@ -125,15 +148,31 @@ def maintain(ip: str | None, batch: bool) -> None:
 
 
 @main.command()
+@click.option("--source", default=None, help="Capture to build from (device_dir/filename.tar.gz); defaults to the latest gold capture")
+def build(source: str | None) -> None:
+    """Build a deployable Kodi profile from a capture and publish it to SMB."""
+    config = _build_config()
+    result = _run(
+        OperationType.BUILD,
+        "",
+        functools.partial(
+            _build_job.run_build,
+            source=source,
+            smb=_smb(config),
+            config=config,
+        ),
+    )
+    click.echo(f"[+++] {result}")
+
+
+@main.command()
 @click.argument("ip", required=False)
 @click.option("--batch", is_flag=True, help="Run on all known devices")
-@click.option("--backup", default=None, help="Specific backup reference to deploy (device_dir/filename.tar.gz)")
+@click.option("--backup", default=None, help="Specific build to deploy (builds/filename.tar.gz); defaults to the latest build")
 def deploy(ip: str | None, batch: bool, backup: str | None) -> None:
-    """Deploy a backup (or the device's latest one) from the SMB share."""
+    """Deploy a built profile (or the latest build) from the SMB share."""
     device_store = _devices()
-    targets = [d.ip for d in device_store.list()] if batch else [ip]
-    if not targets or not targets[0]:
-        raise click.UsageError("Provide an IP or use --batch")
+    targets = _resolve_targets(ip, batch)
     config = _build_config()
     keys = _adb_keys()
     smb = _smb(config)
@@ -143,11 +182,20 @@ def deploy(ip: str | None, batch: bool, backup: str | None) -> None:
         base_apk_local = _deploy_job.resolve_base_apk(apk_cache_dir, smb, config)
         for target_ip in targets:
             click.echo(f"[*] Deploying to {target_ip}...")
-            result = _run(OperationType.DEPLOY, target_ip, functools.partial(
-                _deploy_job.run_deploy, ip=target_ip, backup_name=backup,
-                devices=device_store, adb_keys=keys, smb=smb, config=config,
-                base_apk_local=base_apk_local,
-            ))
+            result = _run(
+                OperationType.DEPLOY,
+                target_ip,
+                functools.partial(
+                    _deploy_job.run_deploy,
+                    ip=target_ip,
+                    backup_name=backup,
+                    devices=device_store,
+                    adb_keys=keys,
+                    smb=smb,
+                    config=config,
+                    base_apk_local=base_apk_local,
+                ),
+            )
             click.echo(f"[+++] {result}")
     finally:
         shutil.rmtree(apk_cache_dir, ignore_errors=True)
@@ -159,10 +207,19 @@ def deploy(ip: str | None, batch: bool, backup: str | None) -> None:
 def capture(ip: str, name: str | None) -> None:
     """Capture a device's Kodi config and upload it to the SMB share."""
     config = _build_config()
-    result = _run(OperationType.CAPTURE, ip, functools.partial(
-        _capture_job.run_capture, ip=ip, backup_name=name,
-        devices=_devices(), adb_keys=_adb_keys(), smb=_smb(config), config=config,
-    ))
+    result = _run(
+        OperationType.CAPTURE,
+        ip,
+        functools.partial(
+            _capture_job.run_capture,
+            ip=ip,
+            backup_name=name,
+            devices=_devices(),
+            adb_keys=_adb_keys(),
+            smb=_smb(config),
+            config=config,
+        ),
+    )
     click.echo(f"[+++] {result}")
 
 
@@ -188,9 +245,16 @@ def list_backups() -> None:
 def scan(subnet: str) -> None:
     """Scan the network for Firesticks and update the device inventory."""
     keys = _adb_keys()
-    result = _run(OperationType.SCAN, subnet, functools.partial(
-        _scan_job.run_scan, subnet=subnet, devices=_devices(), adb_runner=AdbShellRunner(keys),
-    ))
+    result = _run(
+        OperationType.SCAN,
+        subnet,
+        functools.partial(
+            _scan_job.run_scan,
+            subnet=subnet,
+            devices=_devices(),
+            adb_runner=AdbShellRunner(keys),
+        ),
+    )
     click.echo(f"[+++] {result}")
 
 
@@ -208,9 +272,16 @@ def apply_display(ip: str, resolution_index: int | None, overscan: tuple[int, in
         settings["overscan"] = {"left": left, "top": top, "right": right, "bottom": bottom}
     if not settings:
         raise click.UsageError("Provide --resolution-index and/or --overscan")
-    result = _run(OperationType.DISPLAY, ip, functools.partial(
-        _display_job.run_apply_display, ip=ip, display_settings=settings, adb_keys=_adb_keys(),
-    ))
+    result = _run(
+        OperationType.DISPLAY,
+        ip,
+        functools.partial(
+            _display_job.run_apply_display,
+            ip=ip,
+            display_settings=settings,
+            adb_keys=_adb_keys(),
+        ),
+    )
     click.echo(f"[+++] {result}")
 
 

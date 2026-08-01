@@ -6,8 +6,10 @@ can no longer lose an update, and the one atomic-write implementation
 extension: `.yml`/`.yaml` for the human-edited CLI inventory, JSON
 otherwise (e.g. an HA integration's internal store).
 """
+
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 import os
@@ -40,7 +42,7 @@ class DeviceStore:
         self._is_yaml = path.suffix.lower() in _YAML_SUFFIXES
         self._lock = threading.Lock()
 
-    def list(self) -> list[Device]:
+    def list(self) -> builtins.list[Device]:
         """RETURNS: list[Device]: All known devices."""
         with self._lock:
             return self._load()
@@ -74,7 +76,7 @@ class DeviceStore:
             self._save(devices)
             return True
 
-    def reconcile(self, discovered: list[Device]) -> ReconcileResult:
+    def reconcile(self, discovered: builtins.list[Device]) -> ReconcileResult:
         """Merge freshly scanned devices into the store, under the write lock.
 
         PARAMETERS:
@@ -89,7 +91,7 @@ class DeviceStore:
             self._save(result.devices)
             return result
 
-    def _load(self) -> list[Device]:
+    def _load(self) -> builtins.list[Device]:
         if not self._path.exists():
             return []
         with open(self._path, encoding="utf-8") as f:
@@ -103,7 +105,7 @@ class DeviceStore:
             return [Device.model_validate(raw) for raw in data["devices"]]
         return []
 
-    def _save(self, devices: list[Device]) -> None:
+    def _save(self, devices: builtins.list[Device]) -> None:
         tmp_path = self._path.with_name(f"{self._path.name}.{uuid.uuid4().hex}.tmp")
         payload = {"devices": [d.model_dump() for d in devices]}
         self._path.parent.mkdir(parents=True, exist_ok=True)

@@ -4,6 +4,7 @@ Deliberately free of any consumer-specific imports (no Home Assistant, no
 click) so this package can be constructed and tested standalone, and used
 identically from the CLI or from an HA integration wrapping it.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,7 +31,11 @@ class Device(BaseModel):
             `{"resolution_index": int, "overscan": {"left": int, "top": int,
             "right": int, "bottom": int}}`, both optional. Captured live from
             the device by `jobs.capture` and reapplied by `jobs.deploy` after
-            every sync; empty if never captured or calibrated.
+            every deploy; empty if never captured or calibrated.
+        settings (dict[str, Any]): Per-device Kodi setting overrides,
+            `{userdata-relative file: {setting_id: value}}`, hand-maintained
+            in `devices.yml`. Applied by `jobs.deploy` on top of the shared
+            build — see `_device_settings`. Empty for most devices.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -42,6 +47,7 @@ class Device(BaseModel):
     serial: str = ""
     android_version: str = ""
     display: dict[str, Any] = Field(default_factory=dict)
+    settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class BackupMeta(BaseModel):
@@ -138,6 +144,7 @@ class OperationType(str, Enum):
 
     CAPTURE = "capture"
     CAPTURE_GOLD = "capture_gold"
+    BUILD = "build"
     DEPLOY = "deploy"
     MAINTAIN = "maintain"
     SCAN = "scan"

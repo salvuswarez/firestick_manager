@@ -5,13 +5,12 @@ TCP+auth handshake, on *every* shell command — a maintenance pass issuing
 ~35 commands paid ~35 handshakes. `AdbClient` holds one connection for the
 life of a job; `AdbKeyStore` loads the signer once and caches it.
 """
+
 from __future__ import annotations
 
-import hashlib
 import io
 import logging
 import os
-import re
 import shlex
 import stat
 from dataclasses import dataclass
@@ -22,8 +21,6 @@ from .const import ADB_PORT
 
 LOGGER = logging.getLogger(__name__)
 
-_MD5_RE = re.compile(r"^[0-9a-f]{32}$")
-
 # adb_shell's AdbDeviceTcp.shell()/pull()/push() each take their own
 # transport_timeout_s/read_timeout_s per call — they do NOT inherit the
 # connection-level default_transport_timeout_s set at construction, and
@@ -33,7 +30,12 @@ _MD5_RE = re.compile(r"^[0-9a-f]{32}$")
 # multi-hundred-MB backup transfer — which is exactly what timed out mid-pull.
 _SHELL_TIMEOUT_S = 60.0
 _TRANSFER_TIMEOUT_S = 180.0
-_CHUNK_SIZE = 65536
+
+# Floor throughput used to scale a transfer's timeout by file size. A whole
+# built Kodi profile is a few hundred MB, which cannot finish inside the flat
+# 180s default on a marginal wifi link — but a flat "very large" timeout would
+# also mask a genuinely dead connection on a small file.
+_MIN_TRANSFER_BYTES_PER_S = 250_000.0
 
 
 class AdbError(Exception):
@@ -166,16 +168,36 @@ class AdbClient:
                 thread pool on the first non-responsive host instead of
                 just skipping it.
         """
+        self._connect()
+        return self
+
+    def _connect(self) -> None:
         from adb_shell.adb_device import AdbDeviceTcp
 
         try:
-            self._device = AdbDeviceTcp(
-                self._ip, self._port, default_transport_timeout_s=self._transport_timeout_s
-            )
+            self._device = AdbDeviceTcp(self._ip, self._port, default_transport_timeout_s=self._transport_timeout_s)
             self._device.connect(rsa_keys=[self._key_store.signer()], auth_timeout_s=self._auth_timeout_s)
         except Exception as exc:
             raise AdbCommandError(f"ADB connect failed for {self._ip}: {exc}") from exc
-        return self
+
+    def reconnect(self) -> None:
+        """Tear down and re-establish the connection.
+
+        A stalled transfer can leave the stream desynchronized — the client
+        waiting on a packet the device already sent, or `adbd` unresponsive
+        after a burst of traffic. Both survive a longer timeout but not a
+        fresh socket.
+
+        **RAISES:**
+            `AdbCommandError`: If reconnecting fails.  <br>
+        """
+        if self._device is not None:
+            try:
+                self._device.close()
+            except Exception:
+                LOGGER.debug("Error closing ADB connection to %s before reconnect", self._ip, exc_info=True)
+        self._device = None
+        self._connect()
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         if self._device is not None:
@@ -247,97 +269,55 @@ class AdbClient:
             raise AdbCommandError(f"ADB pull failed for {self._ip} ({remote_path}): {exc}") from exc
 
     def push_file(self, local_path: str, remote_path: str) -> None:
-        """Push a single file to the device.
+        """Push a single file to the device, retrying once on a stalled transfer.
 
-        RAISES:
-            AdbCommandError: If the push fails.
+        The timeout scales with file size (see `_MIN_TRANSFER_BYTES_PER_S`), so
+        a multi-hundred-MB profile archive gets a proportionate window instead
+        of the flat default sized for small files.
+
+        **PARAMETERS:**
+            `local_path` (str): File to upload.  <br>
+            `remote_path` (str): Destination path on the device.  <br>
+
+        **RAISES:**
+            `AdbCommandError`: If the push fails twice, or the file can't be read.  <br>
         """
-        try:
-            timeout = self._key_store.transfer_timeout_s
-            with open(local_path, "rb") as f:
-                buf = io.BytesIO(f.read())
-            self._device.push(buf, remote_path, transport_timeout_s=timeout, read_timeout_s=timeout)
-        except Exception as exc:
-            raise AdbCommandError(f"ADB push failed for {self._ip} ({remote_path}): {exc}") from exc
+        size = Path(local_path).stat().st_size
+        timeout = max(self._key_store.transfer_timeout_s, size / _MIN_TRANSFER_BYTES_PER_S)
+        with open(local_path, "rb") as f:
+            payload = f.read()
 
-    def sync_tree(self, local_dir: str, remote_dir: str) -> tuple[int, int]:
-        """Push only new/changed files from `local_dir` to `remote_dir`, and
-        remove any remote file with no local counterpart, so the two trees
-        end up identical without re-transferring every unchanged file over
-        ADB (much slower than the SMB link a backup was already downloaded
-        over) on every single deploy.
+        for attempt in (1, 2):
+            try:
+                self._device.push(io.BytesIO(payload), remote_path, transport_timeout_s=timeout, read_timeout_s=timeout)
+                return
+            except Exception as exc:
+                if attempt == 2:
+                    raise AdbCommandError(f"ADB push failed for {self._ip} ({remote_path}): {exc}") from exc
+                LOGGER.warning("ADB push stalled for %s (%s), reconnecting: %s", self._ip, remote_path, exc)
+                self.reconnect()
 
-        Replaces the old `push_tree`, which unconditionally pushed every
-        file on every call — fine for a first deploy, wasteful for every
-        deploy after it.
+    def free_bytes(self, remote_dir: str) -> int:
+        """Report free space on the filesystem holding `remote_dir`.
 
-        PARAMETERS:
-            local_dir (str): Local directory to sync from.
-            remote_dir (str): Destination directory on the device.
+        Used to bail out before pushing an archive that wouldn't fit rather
+        than filling the device and failing mid-extract.
 
-        RETURNS:
-            tuple[int, int]: `(files pushed, files removed)`.
+        **PARAMETERS:**
+            `remote_dir` (str): Any path on the filesystem to measure.  <br>
 
-        RAISES:
-            AdbCommandError: If creating a remote directory or any file
-                push fails.
+        **RETURNS:**
+            `int`: Free bytes, or ``0`` if `df` output couldn't be parsed.  <br>
         """
-        remote_hashes = self._remote_file_hashes(remote_dir)
-        local_hashes = _local_file_hashes(local_dir)
-
-        to_push = sorted(rel for rel, digest in local_hashes.items() if remote_hashes.get(rel) != digest)
-        to_remove = sorted(rel for rel in remote_hashes if rel not in local_hashes)
-
-        for rel in to_remove:
-            self.shell_ok(f"rm -f {shlex.quote(f'{remote_dir}/{rel}')}")
-
-        for rel in to_push:
-            remote_path = f"{remote_dir}/{rel}"
-            parent = remote_path.rsplit("/", 1)[0]
-            self.shell(f"mkdir -p {shlex.quote(parent)}")
-            self.push_file(str(Path(local_dir) / rel), remote_path)
-
-        return len(to_push), len(to_remove)
-
-    def _remote_file_hashes(self, remote_dir: str) -> dict[str, str]:
-        """RETURNS: dict[str, str]: `{relative_path: md5_hex}` for every file
-        currently under `remote_dir`, or `{}` if it doesn't exist yet (e.g.
-        the first deploy to a fresh device).
-
-        Parses `md5sum`'s `<32-hex-digest><space(s)>[*]<path>` format by
-        position rather than splitting on whitespace, since real Kodi
-        profiles contain filenames with spaces (e.g. a TMDbHelper custom
-        node file literally named `TMDb Discover.json`, found on a live
-        device this session) that would otherwise be misparsed.
-        """
-        output = self.shell_ok(f"find {shlex.quote(remote_dir)} -type f -exec md5sum {{}} +")
-        prefix = f"{remote_dir}/"
-        hashes: dict[str, str] = {}
-        for line in output.splitlines():
-            digest = line[:32]
-            if len(line) < 34 or not _MD5_RE.match(digest):
-                continue
-            rest = line[32:]
-            path = rest[2:] if rest[:2] in ("  ", " *") else rest.lstrip()
-            if path.startswith(prefix):
-                hashes[path[len(prefix):]] = digest
-        return hashes
-
-
-def _local_file_hashes(local_dir: str) -> dict[str, str]:
-    """RETURNS: dict[str, str]: `{relative_path: md5_hex}` for every file
-    under `local_dir`, keyed with forward slashes to match the device side."""
-    hashes: dict[str, str] = {}
-    base = Path(local_dir)
-    for path in base.rglob("*"):
-        if not path.is_file():
-            continue
-        digest = hashlib.md5()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(_CHUNK_SIZE), b""):
-                digest.update(chunk)
-        hashes[path.relative_to(base).as_posix()] = digest.hexdigest()
-    return hashes
+        output = self.shell_ok(f"df -k {shlex.quote(remote_dir)}")
+        lines = output.splitlines()
+        if len(lines) < 2:
+            return 0
+        parts = lines[-1].split()
+        for value in reversed(parts):
+            if value.isdigit():
+                return int(value) * 1024
+        return 0
 
 
 @dataclass(frozen=True, slots=True)

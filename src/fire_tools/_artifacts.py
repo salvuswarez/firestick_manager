@@ -4,6 +4,7 @@ Single owner of "what a backup is called and where it lives" — capture,
 deploy, and list_backups all speak `BackupRef` instead of re-deriving
 filenames and SMB/local paths from string formatting in three places.
 """
+
 from __future__ import annotations
 
 import os
@@ -24,7 +25,14 @@ _UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]")
 def _is_safe_segment(part: str) -> bool:
     return bool(_SAFE_PATH_SEGMENT.match(part)) and ".." not in part and part != "."
 
+
 GOLD_DEVICE_DIR = "gold"
+
+# Built, ready-to-deploy profiles live in their own SMB directory, separate
+# from raw captures. A build archive is *flat* (`addons/`, `userdata/`,
+# `media/` at the tar root, no `.kodi/` wrapper) so deploy can extract it
+# straight into the device's Kodi directory with no path rewriting.
+BUILD_DEVICE_DIR = "builds"
 
 
 def sanitize_device_name(name: str) -> str:

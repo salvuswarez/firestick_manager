@@ -4,9 +4,16 @@
 #
 # `ip`/`mac`/`name` are written by `scan`. `display` is written by `capture`
 # (reads the device's live guisettings.xml) and reapplied by `deploy` after
-# every sync — hand-add it only to pre-seed calibration before a first
+# every deploy — hand-add it only to pre-seed calibration before a first
 # capture, or run `uv run fire-tools apply-display <ip> --resolution-index
 # ... --overscan ...` to set it live and let the next capture record it.
+#
+# `settings` is hand-maintained. A build is one artifact shared by the whole
+# fleet, so anything that has to differ per stick goes here and is patched
+# onto the device after the build is extracted. Keys are paths relative to
+# the device's `userdata/`; values are Kodi setting ids and their values.
+# `scan` preserves both `display` and `settings` — it only ever updates the
+# identity fields above them.
 
 devices:
   - ip: 192.168.1.50
@@ -22,3 +29,8 @@ devices:
         top: 0
         right: 1920
         bottom: 1080
+    settings:
+      guisettings.xml:
+        audiooutput.channels: "1"
+      addon_data/pvr.iptvsimple/settings.xml:
+        m3uPath: "http://192.168.1.50/playlist.m3u"
