@@ -1,4 +1,5 @@
 """Display job: patch per-device resolution/overscan into guisettings.xml."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -56,7 +57,7 @@ def patch_display_settings(adb: AdbClient, display_settings: dict[str, Any], han
     if resolution_index is not None:
         handle.log(f"Setting resolution index to {resolution_index}...")
         adb.shell(
-            "sed -i 's|<setting id=\"videoscreen.resolution\">.*</setting>|"
+            'sed -i \'s|<setting id="videoscreen.resolution">.*</setting>|'
             f'<setting id="videoscreen.resolution">{resolution_index}</setting>|\' {REMOTE_GUISETTINGS_PATH}'
         )
 
@@ -74,9 +75,7 @@ def patch_display_settings(adb: AdbClient, display_settings: dict[str, Any], han
         adb.shell(f'sed -i "0,/<bottom>.*<\\/bottom>/s|<bottom>.*</bottom>|<bottom>{bottom}</bottom>|" {REMOTE_GUISETTINGS_PATH}')
 
 
-def run_apply_display(
-    handle: OperationHandle, ws: Path, *, ip: str, display_settings: dict[str, Any], adb_keys: AdbKeyStore
-) -> str:
+def run_apply_display(handle: OperationHandle, ws: Path, *, ip: str, display_settings: dict[str, Any], adb_keys: AdbKeyStore) -> str:
     """Patch Kodi's resolution index and/or overscan calibration on a device.
 
     PARAMETERS:

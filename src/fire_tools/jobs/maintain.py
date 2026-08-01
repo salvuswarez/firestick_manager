@@ -1,4 +1,5 @@
 """Maintenance job: disable bloatware, trim caches, disable telemetry."""
+
 from __future__ import annotations
 
 import shlex

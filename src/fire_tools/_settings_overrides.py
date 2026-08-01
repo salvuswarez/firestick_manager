@@ -14,6 +14,7 @@ allowed up to 10 concurrent background threads, and thumbnail caching was
 redirected over network SMB instead of local storage — all compounding into
 a low-memory kill (see gotcha_textures_db_stale_index memory).
 """
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET

@@ -1,4 +1,5 @@
 """Scan job: sweep a subnet for ADB-reachable devices and merge into the fleet."""
+
 from __future__ import annotations
 
 from pathlib import Path

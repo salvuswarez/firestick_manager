@@ -13,6 +13,7 @@ don't. These three expressions make both unconditional:
 Wall views (510-514) stay disabled — low-memory devices, see
 `_settings_overrides.py`.
 """
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -26,10 +27,7 @@ VIEW_EXPRESSION_OVERRIDES: dict[str, str] = {
         "String.IsEqual(Container.PluginName,plugin.video.themoviedb.helper)] | "
         "[!String.IsEmpty(Container.PluginName)]]] | [Container.Content(tvshows)]]"
     ),
-    "Exp_View_521": (
-        "[Container.Content() + String.IsEqual(Container.Property(param.info),watch_providers) + "
-        "[!String.IsEmpty(Container.PluginName)]]"
-    ),
+    "Exp_View_521": ("[Container.Content() + String.IsEqual(Container.Property(param.info),watch_providers) + " "[!String.IsEmpty(Container.PluginName)]]"),
     "Exp_View_524": (
         "[[Container.Content(sets) + [[String.IsEmpty(Container.PluginName)] | [!String.IsEmpty(Container.PluginName)]]] | "
         "[Container.Content(seasons)] | "

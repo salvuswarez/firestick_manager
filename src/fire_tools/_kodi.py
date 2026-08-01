@@ -1,4 +1,5 @@
 """Kodi/device-health probes shared by the capture job and the check_device command."""
+
 from __future__ import annotations
 
 import re

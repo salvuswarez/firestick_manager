@@ -1,4 +1,5 @@
 """Capture job: archive a device's Kodi profile and upload it to SMB."""
+
 from __future__ import annotations
 
 import gzip
@@ -93,8 +94,7 @@ def run_capture(
         # the same device — this is the reliable path, not a style choice.
         device_tar_plain = device_tar.removesuffix(".gz")
         adb.shell(
-            f"tar cf {shlex.quote(device_tar_plain)} "
-            f"-C {shlex.quote(os.path.dirname(REMOTE_KODI_PATH))} {ref.archive_root}",
+            f"tar cf {shlex.quote(device_tar_plain)} " f"-C {shlex.quote(os.path.dirname(REMOTE_KODI_PATH))} {ref.archive_root}",
             timeout_s=adb_keys.transfer_timeout_s,
         )
         adb.shell(f"gzip {shlex.quote(device_tar_plain)}", timeout_s=adb_keys.transfer_timeout_s)

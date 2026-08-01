@@ -1,4 +1,5 @@
 """Network scanner for Firetools devices."""
+
 from __future__ import annotations
 
 import logging

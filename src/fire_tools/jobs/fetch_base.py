@@ -1,4 +1,5 @@
 """Fetch-base job: download the latest stable Kodi Android APK to the gold share."""
+
 from __future__ import annotations
 
 import re

@@ -11,6 +11,7 @@ the original `_operations`/`_op_*` globals:
 - Retention is bounded instead of growing for the process lifetime.
 - Persisted records failing to parse are skipped, not trusted as-is.
 """
+
 from __future__ import annotations
 
 import json
@@ -214,8 +215,13 @@ class OperationRegistry:
 
 def _copy(op: Operation) -> Operation:
     return Operation(
-        id=op.id, type=op.type, device_ip=op.device_ip, status=op.status,
-        logs=list(op.logs), started_at=op.started_at, completed_at=op.completed_at,
+        id=op.id,
+        type=op.type,
+        device_ip=op.device_ip,
+        status=op.status,
+        logs=list(op.logs),
+        started_at=op.started_at,
+        completed_at=op.completed_at,
         result=op.result,
     )
 

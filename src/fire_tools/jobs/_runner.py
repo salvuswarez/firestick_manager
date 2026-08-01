@@ -5,6 +5,7 @@ missing `finally` cleanups) into one place: every job gets its own
 workspace, cleaned up on any exit path, and a uniform cancelled/failed/
 completed outcome.
 """
+
 from __future__ import annotations
 
 import logging

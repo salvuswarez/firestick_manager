@@ -4,6 +4,7 @@ Extracted out of the scan task so the mac -> serial -> ip matching logic is
 testable as plain data in, data out, instead of only reachable by running a
 live ping sweep against real hardware.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

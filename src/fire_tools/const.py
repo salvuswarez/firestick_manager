@@ -1,4 +1,5 @@
 """Shared constants: ADB paths, cleanup lists, and SMB defaults."""
+
 from __future__ import annotations
 
 # ADB
@@ -74,20 +75,33 @@ MAINTENANCE_PRUNE_PATHS = (
 # package, since that's a functionality tradeoff, not pure bloat).
 BLOAT_PACKAGES = (
     # Shopping / storefront
-    "com.amazon.shoptv.client", "com.amazon.shoptv.firetv.client",
-    "com.amazon.alexashopping", "com.amazon.venezia",
+    "com.amazon.shoptv.client",
+    "com.amazon.shoptv.firetv.client",
+    "com.amazon.alexashopping",
+    "com.amazon.venezia",
     # Telemetry / usage metrics / crash reporting
-    "com.amazon.client.metrics", "com.amazon.device.logmanager",
-    "com.amazon.tv.fw.metrics", "com.amazon.kso.blackbird",
-    "com.amazon.minerva.client.api", "com.amazon.perfc",
-    "com.amazon.perfcollection", "com.amazon.csm.htmlruntime",
-    "com.amazon.wirelessmetrics.service", "com.amazon.device.crashmanager",
-    "com.amazon.device.metrics", "com.amazon.dp.logger",
-    "com.amazon.recess", "com.amazon.tahoe", "com.amazon.ags.app",
-    "com.amazon.logan", "com.amazon.firebat",
+    "com.amazon.client.metrics",
+    "com.amazon.device.logmanager",
+    "com.amazon.tv.fw.metrics",
+    "com.amazon.kso.blackbird",
+    "com.amazon.minerva.client.api",
+    "com.amazon.perfc",
+    "com.amazon.perfcollection",
+    "com.amazon.csm.htmlruntime",
+    "com.amazon.wirelessmetrics.service",
+    "com.amazon.device.crashmanager",
+    "com.amazon.device.metrics",
+    "com.amazon.dp.logger",
+    "com.amazon.recess",
+    "com.amazon.tahoe",
+    "com.amazon.ags.app",
+    "com.amazon.logan",
+    "com.amazon.firebat",
     # Ad targeting / content recognition
-    "com.amazon.tv.acr", "com.amazon.ftvads.deeplinking",
-    "com.amazon.hybridadidservice", "com.amazon.d3",
+    "com.amazon.tv.acr",
+    "com.amazon.ftvads.deeplinking",
+    "com.amazon.hybridadidservice",
+    "com.amazon.d3",
     # Phone-home / comms backbone. Confirmed 2026-07-30 via live logcat:
     # kindleautomatictimezone retry-loops against dcape-na.amazon.com
     # (DNS-blocked at the router) via RetryingCallable; smarthomemapviewapp
@@ -98,31 +112,48 @@ BLOAT_PACKAGES = (
     # shell (SecurityException); `pm disable-user` silently no-ops on
     # failure here (see adb-device-ops skill), so verify with
     # `pm list packages -d` after a maintain run rather than assuming.
-    "com.amazon.kindleautomatictimezone", "com.amazon.smarthomemapviewapp",
-    "com.amazon.dcp", "com.amazon.dcp.contracts.library",
+    "com.amazon.kindleautomatictimezone",
+    "com.amazon.smarthomemapviewapp",
+    "com.amazon.dcp",
+    "com.amazon.dcp.contracts.library",
     "com.amazon.dcp.contracts.framework.library",
-    "com.amazon.tcomm", "com.amazon.tcomm.client", "com.amazon.tcomm.jackson",
-    "com.amazon.diode", "com.amazon.communication.discovery",
-    "com.amazon.sync.provider.ipc", "com.amazon.whisperplay.contracts",
+    "com.amazon.tcomm",
+    "com.amazon.tcomm.client",
+    "com.amazon.tcomm.jackson",
+    "com.amazon.diode",
+    "com.amazon.communication.discovery",
+    "com.amazon.sync.provider.ipc",
+    "com.amazon.whisperplay.contracts",
     "com.amazon.whisperplay.service.install",
     # Onboarding / tutorial / promotional nag screens
-    "com.amazon.firehomestarter", "com.amazon.storm.lightning.tutorial",
-    "com.amazon.tmm.tutorial", "com.amazon.tv.releasenotes",
-    "com.amazon.systemnotices", "com.amazon.uxnotification",
-    "com.amazon.tv.notificationcenter", "com.amazon.whisperjoin.middleware.np",
+    "com.amazon.firehomestarter",
+    "com.amazon.storm.lightning.tutorial",
+    "com.amazon.tmm.tutorial",
+    "com.amazon.tv.releasenotes",
+    "com.amazon.systemnotices",
+    "com.amazon.uxnotification",
+    "com.amazon.tv.notificationcenter",
+    "com.amazon.whisperjoin.middleware.np",
     # Prime Video specific (not used - Kodi/YouTube only)
-    "com.amazon.awvflingreceiver", "com.amazon.stillwatching.activity",
+    "com.amazon.awvflingreceiver",
+    "com.amazon.stillwatching.activity",
     # Reading/photos/kindle ecosystem, misc unused apps
-    "com.amazon.ods.kindleconnect", "com.amazon.bueller.photos",
+    "com.amazon.ods.kindleconnect",
+    "com.amazon.bueller.photos",
     "com.amazon.minitv.android.app",
     # Placeholder/stub apps - fake tiles for content types Fire OS doesn't
     # actually offer (e.g. a non-functional "Alarm Clock" launcher icon).
     # Verified present on a real device and zero functional risk to disable.
-    "com.amazon.dummy.alarmclock", "com.amazon.dummy.calendar",
-    "com.amazon.dummy.contacts", "com.amazon.dummy.gallery",
-    "com.amazon.dummy.music", "com.amazon.dummy.settings",
+    "com.amazon.dummy.alarmclock",
+    "com.amazon.dummy.calendar",
+    "com.amazon.dummy.contacts",
+    "com.amazon.dummy.gallery",
+    "com.amazon.dummy.music",
+    "com.amazon.dummy.settings",
     # OTA update mechanism (deliberately disabled - see original list)
-    "com.amazon.device.software.ota", "com.amazon.device.software.ota.override",
+    "com.amazon.device.software.ota",
+    "com.amazon.device.software.ota.override",
     "com.amazon.kindle.otter.oobe.corp.ad",
-    "com.amazon.avod", "com.amazon.tv.nimble",
+    "com.amazon.avod",
+    "com.amazon.tv.nimble",
 )

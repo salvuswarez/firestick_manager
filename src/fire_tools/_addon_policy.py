@@ -6,6 +6,7 @@ curated allow-list an earlier core.py/glossary.py-based architecture had,
 rebuilt 2026-07-30 from what's actually installed on the current gold
 device rather than carrying forward the prior stale list.
 """
+
 from __future__ import annotations
 
 import shutil
