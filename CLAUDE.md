@@ -31,7 +31,16 @@ These are three separate stages, and the split is deliberate:
 
 Deploy does no profile shaping. If you're tempted to add a transform to `jobs/deploy.py`, it belongs in `jobs/build.py` — the exception is anything that genuinely differs per stick, which goes in `devices.yml` under `settings` and flows through `_device_settings.py`.
 
-The single-archive transfer replaced a per-file sync (`AdbClient.sync_tree`, removed in 0.1.13) that cost one ADB round-trip per file plus a `mkdir` per file plus an `rm` per stale remote file — thousands of round-trips per deploy, which reliably wedged `adbd` partway through `userdata/`.
+The single-archive transfer replaced a per-file sync (`AdbClient.sync_tree`, removed in 0.1.13) that cost one ADB round-trip per file plus a `mkdir` per file plus an `rm` per stale remote file — thousands of round-trips per deploy.
+
+## Uploads go over netcat, not adb_shell
+
+`AdbClient.push_file()` streams to `toybox nc` on the device. **`adb_shell`'s own `push()` does not work against these devices** — measured 2026-08-01 on a real Fire TV, it moved *zero* bytes and hung until timeout for anything over a few MB (the destination file was never even created), from both a dev workstation and HA. Netcat moves the same payload at 5-12 MB/s. `shell()` and `pull()` are unaffected and still use `adb_shell` — capture's pull is proven working, so don't "unify" it onto netcat.
+
+Two non-obvious constraints, both found the hard way:
+
+- **The listener can't be backgrounded.** `adb_shell` closes the shell stream when a command returns and the device tears the process group down with it, killing a `&`-backgrounded `nc` before anything connects; `nohup` and `setsid` don't save it. `_NcListener` instead holds `nc -l` running on its own ADB connection in a worker thread, and it exits naturally when the transfer socket closes.
+- **`nc` drops its buffered tail** if the sender closes as soon as the last byte is written — transfers arrived 8-24KB short. `push_file` waits for the device-side file to reach the expected size before closing, and **always md5-checks the result**. Don't remove that digest check; it's the only thing standing between a short write and a corrupt deploy.
 - `assets/` and `archive/` hold real captured Kodi backups (`.kodi_<timestamp>` snapshots) — data, not source; don't bulk-delete
 - `kodi_deployment.py` at the repo root is legacy/superseded — see gotcha memory before touching it
 

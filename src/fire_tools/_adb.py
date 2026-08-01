@@ -8,11 +8,15 @@ life of a job; `AdbKeyStore` loads the signer once and caches it.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
 import shlex
+import socket
 import stat
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -31,11 +35,21 @@ LOGGER = logging.getLogger(__name__)
 _SHELL_TIMEOUT_S = 60.0
 _TRANSFER_TIMEOUT_S = 180.0
 
-# Floor throughput used to scale a transfer's timeout by file size. A whole
-# built Kodi profile is a few hundred MB, which cannot finish inside the flat
-# 180s default on a marginal wifi link — but a flat "very large" timeout would
-# also mask a genuinely dead connection on a small file.
-_MIN_TRANSFER_BYTES_PER_S = 250_000.0
+# Uploads go over a netcat stream rather than adb_shell's push(). Measured
+# 2026-08-01 against a real Fire TV: adb_shell push moved *zero* bytes and
+# hung until timeout for anything over a few MB (the destination file was
+# never even created), while the same host reached ~12 MB/s over netcat.
+# adb_shell's shell() and pull() are unaffected and still used as-is.
+_NC_PORT = 5599
+_NC_CHUNK = 262144
+_NC_CONNECT_TIMEOUT_S = 30.0
+# Cap on how long to wait for the device to finish writing what was already
+# streamed. Only covers the flush after the last byte is sent, not the
+# transfer itself.
+_NC_SETTLE_TIMEOUT_S = 120.0
+# The listener's shell command blocks for the whole transfer, so its timeout
+# has to cover a worst-case upload rather than a single round-trip.
+_NC_LISTENER_TIMEOUT_S = 3600.0
 
 
 class AdbError(Exception):
@@ -180,25 +194,6 @@ class AdbClient:
         except Exception as exc:
             raise AdbCommandError(f"ADB connect failed for {self._ip}: {exc}") from exc
 
-    def reconnect(self) -> None:
-        """Tear down and re-establish the connection.
-
-        A stalled transfer can leave the stream desynchronized — the client
-        waiting on a packet the device already sent, or `adbd` unresponsive
-        after a burst of traffic. Both survive a longer timeout but not a
-        fresh socket.
-
-        **RAISES:**
-            `AdbCommandError`: If reconnecting fails.  <br>
-        """
-        if self._device is not None:
-            try:
-                self._device.close()
-            except Exception:
-                LOGGER.debug("Error closing ADB connection to %s before reconnect", self._ip, exc_info=True)
-        self._device = None
-        self._connect()
-
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
         if self._device is not None:
             try:
@@ -269,33 +264,110 @@ class AdbClient:
             raise AdbCommandError(f"ADB pull failed for {self._ip} ({remote_path}): {exc}") from exc
 
     def push_file(self, local_path: str, remote_path: str) -> None:
-        """Push a single file to the device, retrying once on a stalled transfer.
+        """Upload a file to the device over a netcat stream, verifying the result.
 
-        The timeout scales with file size (see `_MIN_TRANSFER_BYTES_PER_S`), so
-        a multi-hundred-MB profile archive gets a proportionate window instead
-        of the flat default sized for small files.
+        `adb_shell`'s own `push()` is not used: against a real Fire TV it moves
+        zero bytes and hangs for anything beyond a few MB (see `_NC_PORT`). The
+        device listens with `toybox nc` and this streams into it over a plain
+        socket, which measured ~12 MB/s on the same host that `push()` stalled on.
+
+        The transferred file is always md5-checked. `nc` exits as soon as it
+        sees the connection close and silently drops whatever is still in its
+        receive buffer, so a naive send loses the tail — the digest is what
+        makes a short write an error instead of a corrupt deploy.
 
         **PARAMETERS:**
             `local_path` (str): File to upload.  <br>
             `remote_path` (str): Destination path on the device.  <br>
 
         **RAISES:**
-            `AdbCommandError`: If the push fails twice, or the file can't be read.  <br>
+            `AdbCommandError`: If the listener can't start, the stream fails, the
+                device never finishes writing, or the digest doesn't match.  <br>
         """
-        size = Path(local_path).stat().st_size
-        timeout = max(self._key_store.transfer_timeout_s, size / _MIN_TRANSFER_BYTES_PER_S)
-        with open(local_path, "rb") as f:
-            payload = f.read()
+        path = Path(local_path)
+        size = path.stat().st_size
+        expected = _file_md5(path)
+        quoted_remote = shlex.quote(remote_path)
 
-        for attempt in (1, 2):
+        self.shell_ok(f"rm -f {quoted_remote}")
+        listener = _NcListener(self._ip, self._key_store, self._port, remote_path)
+        listener.start()
+        try:
+            self._stream_to_device(path, size, remote_path)
+        except OSError as exc:
+            raise AdbCommandError(f"Netcat push failed for {self._ip} ({remote_path}): {exc}") from exc
+        finally:
+            listener.stop()
+
+        actual = self.shell_ok(f"md5sum {quoted_remote}")[:32]
+        if actual != expected:
+            landed = self._remote_size(remote_path)
+            raise AdbCommandError(
+                f"Netcat push corrupted for {self._ip} ({remote_path}): " f"expected md5 {expected} of {size} bytes, got {actual or 'none'} of {landed} bytes"
+            )
+        LOGGER.debug("Pushed %s to %s:%s (%d bytes, md5 ok)", local_path, self._ip, remote_path, size)
+
+    def _stream_to_device(self, path: Path, size: int, remote_path: str) -> None:
+        """Stream `path` to the waiting `nc` listener and wait for it to land.
+
+        Waits for the device-side file to reach `size` before closing rather
+        than sleeping a fixed interval — closing early is exactly what makes
+        `nc` drop its buffered tail.
+        """
+        sock = self._connect_to_listener()
+        try:
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(_NC_CHUNK)
+                    if not chunk:
+                        break
+                    sock.sendall(chunk)
+            self._await_remote_size(remote_path, size)
+            sock.shutdown(socket.SHUT_WR)
+        finally:
+            sock.close()
+
+    def _connect_to_listener(self) -> socket.socket:
+        """Connect to the device's `nc`, retrying while it finishes binding.
+
+        The port is deliberately not probed first: `nc -l` accepts exactly one
+        connection, so a probe would consume the listener this push needs.
+
+        **RETURNS:**
+            `socket.socket`: Connected socket.  <br>
+
+        **RAISES:**
+            `OSError`: If the listener never came up.  <br>
+        """
+        deadline = time.monotonic() + _NC_CONNECT_TIMEOUT_S
+        last: OSError | None = None
+        while time.monotonic() < deadline:
             try:
-                self._device.push(io.BytesIO(payload), remote_path, transport_timeout_s=timeout, read_timeout_s=timeout)
+                return socket.create_connection((self._ip, _NC_PORT), timeout=_NC_CONNECT_TIMEOUT_S)
+            except OSError as exc:
+                last = exc
+                time.sleep(0.25)
+        raise last or OSError(f"netcat listener never came up on {self._ip}:{_NC_PORT}")
+
+    def _await_remote_size(self, remote_path: str, size: int) -> None:
+        """Block until the device-side file has `size` bytes, or time out.
+
+        A timeout is logged rather than raised — `push_file`'s digest check is
+        the authority on whether the transfer actually succeeded.
+        """
+        deadline = time.monotonic() + _NC_SETTLE_TIMEOUT_S
+        landed = -1
+        while time.monotonic() < deadline:
+            landed = self._remote_size(remote_path)
+            if landed >= size:
                 return
-            except Exception as exc:
-                if attempt == 2:
-                    raise AdbCommandError(f"ADB push failed for {self._ip} ({remote_path}): {exc}") from exc
-                LOGGER.warning("ADB push stalled for %s (%s), reconnecting: %s", self._ip, remote_path, exc)
-                self.reconnect()
+            time.sleep(0.5)
+        LOGGER.warning("Device %s stopped at %d/%d bytes for %s", self._ip, landed, size, remote_path)
+
+    def _remote_size(self, remote_path: str) -> int:
+        """RETURNS: int: Size of `remote_path` on the device, or -1 if unknown."""
+        out = self.shell_ok(f"stat -c %s {shlex.quote(remote_path)}").strip()
+        return int(out) if out.isdigit() else -1
 
     def free_bytes(self, remote_dir: str) -> int:
         """Report free space on the filesystem holding `remote_dir`.
@@ -318,6 +390,63 @@ class AdbClient:
             if value.isdigit():
                 return int(value) * 1024
         return 0
+
+
+class _NcListener:
+    """Runs `toybox nc -l` on the device for the lifetime of one push.
+
+    The listener cannot simply be backgrounded with `&`: `adb_shell` closes the
+    shell stream as soon as the command returns and the device tears the whole
+    process group down with it, so the listener dies before anything connects
+    (confirmed against a real device — `nohup` and `setsid` don't save it
+    either). Instead the command is left *running* on its own connection, held
+    open by a worker thread, and exits naturally when the transfer's socket
+    closes.
+
+    **PARAMETERS:**
+        `ip` (str): Device IPv4 address.  <br>
+        `key_store` (AdbKeyStore): Shared signer cache.  <br>
+        `port` (int): ADB port.  <br>
+        `remote_path` (str): File the listener writes into.  <br>
+    """
+
+    def __init__(self, ip: str, key_store: AdbKeyStore, port: int, remote_path: str) -> None:
+        self._ip = ip
+        self._key_store = key_store
+        self._port = port
+        self._remote_path = remote_path
+        self._thread = threading.Thread(target=self._run, daemon=True, name=f"nc-listener-{ip}")
+        self._error: Exception | None = None
+
+    def start(self) -> None:
+        """Open the listener's connection and start waiting for the transfer."""
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Wait for the listener to exit now that the transfer socket is closed."""
+        self._thread.join(timeout=_NC_SETTLE_TIMEOUT_S)
+        if self._error is not None:
+            LOGGER.debug("Netcat listener on %s ended with: %s", self._ip, self._error)
+
+    def _run(self) -> None:
+        cmd = f"toybox nc -l -p {_NC_PORT} > {shlex.quote(self._remote_path)}"
+        try:
+            with AdbClient(self._ip, self._key_store, port=self._port) as client:
+                # Blocks until the sender closes the socket; the timeout has to
+                # cover the whole transfer, not a single round-trip.
+                client.shell(cmd, timeout_s=_NC_LISTENER_TIMEOUT_S)
+        except Exception as exc:  # noqa: BLE001 - surfaced via the digest check
+            self._error = exc
+
+
+def _file_md5(path: Path) -> str:
+    """RETURNS: str: Hex md5 of `path`, read in chunks so a multi-hundred-MB
+    archive never lands in memory whole."""
+    digest = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(_NC_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
